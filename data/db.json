@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "projects": [
+    { "id": "p1", "name": "Harbour Tower BMS Upgrade", "client": "Facility Team" },
+    { "id": "p2", "name": "Central Plant ELV Acceptance", "client": "Operations" }
+  ],
+  "locations": [
+    { "id": "l1", "projectId": "p1", "name": "Tower A / 12F / AHU Room" },
+    { "id": "l2", "projectId": "p1", "name": "Tower A / Roof / Plant Room" },
+    { "id": "l3", "projectId": "p1", "name": "Tower B / 3F / Office Zone" },
+    { "id": "l4", "projectId": "p2", "name": "Central Plant / LV Room" }
+  ],
+  "equipment": [
+    { "id": "e1", "projectId": "p1", "locationId": "l1", "team": "BMS", "name": "DDC-12F-AHU-01", "type": "DDC Panel", "status": "pending" },
+    { "id": "e2", "projectId": "p1", "locationId": "l1", "team": "BMS", "name": "TE-12F-RA-03", "type": "Temperature Sensor", "status": "failed" },
+    { "id": "e3", "projectId": "p1", "locationId": "l2", "team": "HVAC", "name": "AHU-RF-02", "type": "Air Handling Unit", "status": "passed" },
+    { "id": "e4", "projectId": "p1", "locationId": "l3", "team": "Lighting", "name": "LCP-03F-01", "type": "Lighting Panel", "status": "pending" },
+    { "id": "e5", "projectId": "p2", "locationId": "l4", "team": "Metering", "name": "PM-LV-01", "type": "Power Meter", "status": "rectification" }
+  ],
+  "points": [
+    { "id": "pt1", "equipmentId": "e1", "name": "BACnet/IP communication", "type": "Network", "reference": "Online", "status": "pending" },
+    { "id": "pt2", "equipmentId": "e1", "name": "Supply air temperature AI", "type": "Analog Input", "reference": "22-26 C", "status": "pending" },
+    { "id": "pt3", "equipmentId": "e1", "name": "Fan start command DO", "type": "Digital Output", "reference": "Start/Stop", "status": "pending" },
+    { "id": "pt4", "equipmentId": "e2", "name": "Room temperature reading", "type": "Analog Input", "reference": "+/- 1 C", "status": "failed" },
+    { "id": "pt5", "equipmentId": "e3", "name": "AHU run status DI", "type": "Digital Input", "reference": "Run feedback", "status": "passed" },
+    { "id": "pt6", "equipmentId": "e5", "name": "Modbus address mapping", "type": "Register", "reference": "As-built schedule", "status": "rectification" }
+  ],
+  "records": [
+    {
+      "id": "r1",
+      "projectId": "p1",
+      "locationId": "l1",
+      "team": "BMS",
+      "equipmentId": "e1",
+      "pointId": "pt1",
+      "title": "DDC panel communication test",
+      "status": "pending",
+      "result": "Pending",
+      "comments": "",
+      "photos": [],
+      "assignee": "Ken",
+      "due": "2026-06-28",
+      "sync": "synced",
+      "updatedAt": "2026-06-20 09:15",
+      "serverUpdatedAt": 1781927700000
+    },
+    {
+      "id": "r2",
+      "projectId": "p1",
+      "locationId": "l1",
+      "team": "BMS",
+      "equipmentId": "e2",
+      "pointId": "pt4",
+      "title": "Temperature sensor reading verification",
+      "status": "failed",
+      "result": "Fail",
+      "comments": "Reading deviation is 2.5 C. Calibration is required.",
+      "photos": [],
+      "assignee": "Ivy",
+      "due": "2026-06-24",
+      "sync": "synced",
+      "updatedAt": "2026-06-19 16:40",
+      "serverUpdatedAt": 1781870400000
+    },
+    {
+      "id": "r3",
+      "projectId": "p1",
+      "locationId": "l2",
+      "team": "HVAC",
+      "equipmentId": "e3",
+      "pointId": "pt5",
+      "title": "AHU start/stop control and status feedback",
+      "status": "passed",
+      "result": "Pass",
+      "comments": "Test completed successfully.",
+      "photos": [],
+      "assignee": "Ken",
+      "due": "2026-06-23",
+      "sync": "synced",
+      "updatedAt": "2026-06-18 12:05",
+      "serverUpdatedAt": 1781765100000
+    },
+    {
+      "id": "r4",
+      "projectId": "p2",
+      "locationId": "l4",
+      "team": "Metering",
+      "equipmentId": "e5",
+      "pointId": "pt6",
+      "title": "Power meter Modbus data verification",
+      "status": "rectification",
+      "result": "Fail",
+      "comments": "Address table does not match site conditions.",
+      "photos": [],
+      "assignee": "May",
+      "due": "2026-07-02",
+      "sync": "synced",
+      "updatedAt": "2026-06-20 10:20",
+      "serverUpdatedAt": 1781931600000
+    }
+  ]
+}

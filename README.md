@@ -6,10 +6,14 @@ Offline-first web prototype for ELV/BMS project acceptance, inspection records, 
 
 - Mobile-friendly project, location, team/category, equipment, and inspection flow
 - Desktop dashboard with project progress, open issues, and person statistics
-- Bilingual UI switch between Traditional Chinese and English
-- Local browser storage for records and photos
-- Offline status indicator and pending-sync queue
+- English-first UI with Traditional Chinese toggle
+- Equipment, point, and sub-device hierarchy for BMS/ELV inspections
+- Admin equipment manager with Excel import
+- Local browser storage for records, camera photos, and file attachments
+- Offline status indicator, pending-sync queue, and API-backed sync
 - PWA manifest and service worker cache for offline loading
+- Lightweight Express API with a JSON database at `data/db.json`
+- PostgreSQL migration-ready schema at `docs/postgres-schema.sql`
 
 ## Run Locally
 
@@ -20,6 +24,25 @@ npm.cmd run dev
 
 Open the local URL shown by Vite, usually `http://127.0.0.1:5173/`.
 
+The API runs at `http://127.0.0.1:4177/api`.
+
+## Excel Import
+
+Use the Admin tab and upload `.xlsx`, `.xls`, or `.csv`.
+
+Supported column names:
+
+- `Project`
+- `Location`
+- `Team` / `Category` / `System`
+- `Equipment` / `Equipment Name` / `Device`
+- `Type` / `Equipment Type`
+- `Point` / `Point Name` / `Sub Device`
+- `Point Type` / `Signal Type`
+- `Reference` / `Expected`
+- `Assignee`
+- `Due` / `Target Date`
+
 ## Build
 
 ```powershell
@@ -28,8 +51,8 @@ npm.cmd run build
 
 ## Suggested Next Phase
 
-- Add backend API, PostgreSQL schema, and authentication
-- Replace local-only sync with server-backed sync and conflict handling
-- Add Excel import/export for device lists and checklist templates
+- Replace the JSON database with PostgreSQL using `docs/postgres-schema.sql`
+- Add authentication and role-based permissions
+- Add Excel export for device lists and checklist templates
 - Generate PDF acceptance reports
 - Connect AI translation for comments and report text

@@ -3,12 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "description": "Offline-first ELV/BMS project acceptance web app prototype.",
+  "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "concurrently \"npm:api\" \"npm:web\"",
+    "web": "vite --host 127.0.0.1",
+    "api": "node server/index.js",
     "preview": "vite --host 127.0.0.1",
     "build": "vite build"
   },
   "devDependencies": {
     "vite": "^7.0.0"
+  },
+  "dependencies": {
+    "concurrently": "^10.0.3",
+    "express": "^5.2.1",
+    "xlsx": "^0.18.5"
   }
 }
