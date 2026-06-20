@@ -260,7 +260,6 @@ const dictionary = {
     room: "機房"
   }
 };
-
 const fallbackData = {
   version: 1,
   projects: [{ id: "p1", name: "Harbour Tower BMS Upgrade", client: "Facility Team" }],
@@ -399,7 +398,7 @@ function renderTopbar() {
         <div class="brand-row"><span class="logo-mark">${t("logoText")}</span><h1>${t("appName")}</h1></div>
       </div>
       <div class="actions">
-        <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "中"}</button>
+        <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
         <button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>
         <button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin">${t("admin")}</button>
       </div>
@@ -825,7 +824,7 @@ function renderProjectSummary(project) {
           <span>${t("projectManager")}: <strong>${escapeHtml(project.manager || "-")}</strong></span>
         </div>
         <form data-project-manager="${project.id}" class="manager-popover">
-          <button class="manager-edit-button" type="button" title="${t("updateManager")}" aria-label="${t("updateManager")}">✎</button>
+          <button class="manager-edit-button" type="button" title="${t("updateManager")}" aria-label="${t("updateManager")}">&#9998;</button>
           <div class="manager-edit-panel">
             <label>${t("projectManager")}
               <input name="manager" value="${escapeHtml(project.manager || "")}" placeholder="PM / Engineer" />
@@ -1699,7 +1698,6 @@ function normalizeImportRow(row) {
     Due: pickImportValue(row, ["Due", "Target Date", "目標日期", "目标日期"])
   };
 }
-
 function validateImportRows(rows) {
   const errors = [];
   const warnings = [];
