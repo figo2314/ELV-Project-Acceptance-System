@@ -124,6 +124,13 @@ button {
   grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
 }
 
+.admin-workspace {
+  display: grid;
+  gap: 16px;
+  margin: 0 auto;
+  max-width: 1440px;
+}
+
 .panel {
   background: #fff;
   border: 1px solid #dfe7e5;
@@ -578,8 +585,98 @@ textarea {
 
 .admin-tools {
   align-content: start;
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.admin-tools > div {
+  flex: 1 1 360px;
+}
+
+.project-dashboard {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.project-card {
+  display: grid;
+  gap: 14px;
+}
+
+.manager-row {
+  align-items: end;
   display: grid;
   gap: 12px;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px) auto;
+}
+
+.manager-row h2 {
+  margin: 0;
+}
+
+.admin-filter-row {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 320px) minmax(220px, 320px) minmax(240px, 1fr);
+  margin-bottom: 12px;
+}
+
+.excel-table-wrap {
+  border: 1px solid #dfe7e5;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.excel-table {
+  min-width: 1420px;
+}
+
+.excel-row {
+  display: grid;
+  gap: 0;
+  grid-template-columns: 160px 190px 100px 170px 135px 180px 130px 170px 120px 110px 125px 90px;
+}
+
+.excel-row > span,
+.excel-row > input,
+.excel-row > select,
+.excel-row > button {
+  border: 0;
+  border-bottom: 1px solid #e7eeeb;
+  border-right: 1px solid #e7eeeb;
+  border-radius: 0;
+  min-height: 38px;
+}
+
+.excel-row > input,
+.excel-row > select {
+  background: #fff;
+  padding: 7px 9px;
+}
+
+.excel-row > span {
+  align-items: center;
+  background: #f2f6f4;
+  color: #43545b;
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 9px;
+}
+
+.excel-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.excel-row .ghost {
+  border-radius: 0;
+  min-height: 38px;
 }
 
 .people progress {
@@ -644,7 +741,9 @@ textarea {
 
   .mobile-grid,
   .desktop-grid,
-  .field-grid {
+  .field-grid,
+  .admin-filter-row,
+  .manager-row {
     grid-template-columns: 1fr;
   }
 

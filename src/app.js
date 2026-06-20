@@ -68,7 +68,21 @@ const dictionary = {
     commentPlaceholder: "Type a comment. Previous comments are suggested automatically.",
     selectedEquipment: "Selected Equipment",
     noEquipment: "No equipment in this project/location/team",
-    logoText: "ELV"
+    logoText: "ELV",
+    adminDashboard: "Project Command Center",
+    projectManager: "Project Manager",
+    equipmentQty: "Equipment",
+    inspectedQty: "Inspected",
+    issueQty: "Issues",
+    dataTable: "Inspection Data Table",
+    allEquipment: "All Equipment",
+    updateManager: "Update Manager",
+    rowSaved: "Row saved",
+    equipmentName: "Equipment Name",
+    pointName: "Point Name",
+    equipmentType: "Equipment Type",
+    pointType: "Point Type",
+    status: "Status"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -183,6 +197,9 @@ function defaultState() {
     selectedRecordId: "r1",
     toast: "",
     conflicts: [],
+    adminProjectId: "p1",
+    adminEquipmentId: "",
+    adminSearch: "",
     serverOnline: false,
     data: structuredClone(fallbackData)
   };
@@ -490,29 +507,11 @@ function renderInspectionForm(record) {
 }
 
 function renderAdmin() {
-  const stats = getStats();
-  const people = getPeopleStats();
   return `
-    <section class="desktop-grid">
-      <section class="panel hero-dashboard">
-        <div>
-          <p class="eyebrow">${t("overview")}</p>
-          <h2>${t("allProjects")}</h2>
-        </div>
-        <div class="big-stat">${stats.completion}<span>%</span></div>
-      </section>
-      <section class="panel">
-        <div class="stats wide">
-          ${statCard(t("total"), stats.total)}
-          ${statCard(t("pending"), stats.pending)}
-          ${statCard(t("failed"), stats.failed)}
-          ${statCard(t("rectification"), stats.rectification)}
-          ${statCard(t("passed"), stats.passed)}
-        </div>
-      </section>
+    <section class="admin-workspace">
       <section class="panel admin-tools">
         <div>
-          <div class="section-title">${t("equipmentManager")}</div>
+          <div class="section-title">${t("adminDashboard")}</div>
           <p class="muted">${t("templateHint")}</p>
         </div>
         <label class="file-button">${t("importExcel")}
@@ -521,82 +520,106 @@ function renderAdmin() {
         <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
         <button class="primary sync" data-action="sync">${t("syncNow")}</button>
       </section>
-      <section class="panel">
-        <div class="section-title">${t("database")}</div>
-        ${renderNewEquipmentForm()}
-        <div class="equipment-table">
-          ${state.data.equipment.map(renderEquipmentRow).join("")}
-        </div>
+      <section class="project-dashboard">
+        ${state.data.projects.map(renderProjectSummary).join("")}
       </section>
       <section class="panel">
-        <div class="section-title">${t("openItems")}</div>
-        <div class="table">
-          ${state.data.records
-            .filter((record) => ["failed", "rectification", "pending"].includes(record.status))
-            .map(renderIssueRow)
-            .join("")}
-        </div>
-      </section>
-      <section class="panel">
-        <div class="section-title">${t("personStats")}</div>
-        <div class="people">
-          ${people.map((person) => `<div><strong>${escapeHtml(person.name || "-")}</strong><span>${person.done}/${person.total}</span><progress value="${person.done}" max="${person.total}"></progress></div>`).join("")}
-        </div>
+        <div class="section-title">${t("dataTable")}</div>
+        ${renderAdminFilters()}
+        ${renderDataTable()}
       </section>
       ${state.conflicts.length ? `<section class="panel"><div class="section-title">${t("syncConflicts")}</div>${state.conflicts.map((item) => `<p class="muted">${escapeHtml(item.local.title)}</p>`).join("")}</section>` : ""}
     </section>
   `;
 }
 
-function renderNewEquipmentForm() {
+function renderProjectSummary(project) {
+  const equipment = state.data.equipment.filter((item) => item.projectId === project.id);
+  const records = state.data.records.filter((record) => record.projectId === project.id);
+  const points = state.data.points.filter((point) => equipment.some((item) => item.id === point.equipmentId));
+  const stats = getStats(records);
   return `
-    <form class="editor-row new-equipment" data-editor="equipment">
-      <select name="projectId">${state.data.projects.map((project) => option(project.id, project.name, state.selectedProjectId)).join("")}</select>
-      <select name="locationId">${state.data.locations.map((location) => option(location.id, location.name, state.selectedLocationId)).join("")}</select>
-      <input name="team" placeholder="${t("team")}" value="BMS" />
-      <input name="name" placeholder="${t("equipment")}" required />
-      <input name="type" placeholder="${t("type")}" value="Equipment" />
-      <button class="primary" type="submit">${t("addEquipment")}</button>
-    </form>
+    <section class="panel project-card">
+      <form data-project-manager="${project.id}" class="manager-row">
+        <div>
+          <p class="eyebrow">${escapeHtml(project.client || "-")}</p>
+          <h2>${escapeHtml(project.name)}</h2>
+        </div>
+        <label>${t("projectManager")}
+          <input name="manager" value="${escapeHtml(project.manager || "")}" placeholder="PM / Engineer" />
+        </label>
+        <button class="ghost" type="submit">${t("updateManager")}</button>
+      </form>
+      <div class="stats wide">
+        ${statCard(t("equipmentQty"), equipment.length)}
+        ${statCard(t("pointCount"), points.length)}
+        ${statCard(t("inspectedQty"), stats.passed)}
+        ${statCard(t("pending"), stats.pending)}
+        ${statCard(t("issueQty"), stats.failed + stats.rectification)}
+      </div>
+      <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
+    </section>
   `;
 }
 
-function renderEquipmentRow(item) {
-  const project = state.data.projects.find((candidate) => candidate.id === item.projectId);
-  const location = state.data.locations.find((candidate) => candidate.id === item.locationId);
-  const points = state.data.points.filter((point) => point.equipmentId === item.id);
+function renderAdminFilters() {
+  const equipmentOptions = getAdminFilteredEquipmentOptions();
   return `
-    <div class="equipment-editor">
-      <form class="editor-row" data-editor="equipment" data-id="${item.id}">
-        <select name="projectId">${state.data.projects.map((candidate) => option(candidate.id, candidate.name, item.projectId)).join("")}</select>
-        <select name="locationId">${state.data.locations.map((candidate) => option(candidate.id, candidate.name, item.locationId)).join("")}</select>
-        <input name="team" value="${escapeHtml(item.team)}" />
-        <input name="name" value="${escapeHtml(item.name)}" />
-        <input name="type" value="${escapeHtml(item.type)}" />
-        <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), item.status)).join("")}</select>
-        <button class="ghost" type="submit">${t("saveChanges")}</button>
-      </form>
-      <div class="point-editor-list">
-        ${points.map((point) => renderPointEditor(point)).join("")}
-        <form class="editor-row point-editor" data-editor="point" data-equipment-id="${item.id}">
-          <input name="name" placeholder="${t("point")}" required />
-          <input name="type" placeholder="${t("type")}" value="Point" />
-          <input name="reference" placeholder="${t("reference")}" />
-          <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), "pending")).join("")}</select>
-          <button class="ghost" type="submit">${t("addPoint")}</button>
-        </form>
+    <div class="admin-filter-row">
+      <label>${t("project")}
+        <select data-admin-filter="project">${state.data.projects.map((project) => option(project.id, project.name, state.adminProjectId || state.selectedProjectId)).join("")}</select>
+      </label>
+      <label>${t("equipment")}
+        <select data-admin-filter="equipment">
+          <option value="">${t("allEquipment")}</option>
+          ${equipmentOptions.map((item) => option(item.id, item.name, state.adminEquipmentId || "")).join("")}
+        </select>
+      </label>
+      <label>${t("search")}
+        <input data-admin-filter="search" value="${escapeHtml(state.adminSearch || "")}" placeholder="${t("search")}" />
+      </label>
+    </div>
+  `;
+}
+
+function renderDataTable() {
+  return `
+    <div class="excel-table-wrap">
+      <div class="excel-table">
+        <div class="excel-row excel-head">
+          <span>${t("project")}</span>
+          <span>${t("location")}</span>
+          <span>${t("team")}</span>
+          <span>${t("equipmentName")}</span>
+          <span>${t("equipmentType")}</span>
+          <span>${t("pointName")}</span>
+          <span>${t("pointType")}</span>
+          <span>${t("reference")}</span>
+          <span>${t("assignee")}</span>
+          <span>${t("due")}</span>
+          <span>${t("status")}</span>
+          <span></span>
+        </div>
+        ${getAdminRows().map(renderDataRow).join("")}
       </div>
     </div>
   `;
 }
 
-function renderPointEditor(point) {
+function renderDataRow(row) {
   return `
-    <form class="editor-row point-editor" data-editor="point" data-id="${point.id}" data-equipment-id="${point.equipmentId}">
-      <input name="name" value="${escapeHtml(point.name)}" />
-      <input name="type" value="${escapeHtml(point.type)}" />
-      <input name="reference" value="${escapeHtml(point.reference || "")}" />
-      <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), point.status)).join("")}</select>
+    <form class="excel-row" data-row-editor data-record-id="${row.record.id}" data-equipment-id="${row.equipment.id}" data-point-id="${row.point.id}">
+      <select name="projectId">${state.data.projects.map((project) => option(project.id, project.name, row.equipment.projectId)).join("")}</select>
+      <select name="locationId">${state.data.locations.map((location) => option(location.id, location.name, row.equipment.locationId)).join("")}</select>
+      <input name="team" value="${escapeHtml(row.equipment.team)}" />
+      <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" />
+      <input name="equipmentType" value="${escapeHtml(row.equipment.type)}" />
+      <input name="pointName" value="${escapeHtml(row.point.name)}" />
+      <input name="pointType" value="${escapeHtml(row.point.type)}" />
+      <input name="reference" value="${escapeHtml(row.point.reference || "")}" />
+      <input name="assignee" value="${escapeHtml(row.record.assignee || "")}" />
+      <input name="due" value="${escapeHtml(row.record.due || "")}" />
+      <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
       <button class="ghost" type="submit">${t("saveChanges")}</button>
     </form>
   `;
@@ -646,6 +669,16 @@ function bindEvents() {
   document.querySelector("[data-action='sync']")?.addEventListener("click", () => syncRecords(true));
   document.querySelector("[data-action='translate']")?.addEventListener("click", translateComment);
   document.querySelector("[data-action='import-excel']")?.addEventListener("change", importExcel);
+  document.querySelectorAll("[data-admin-filter]").forEach((field) => {
+    field.addEventListener("change", () => updateAdminFilter(field));
+    field.addEventListener("input", () => updateAdminFilter(field));
+  });
+  document.querySelectorAll("[data-project-manager]").forEach((form) => {
+    form.addEventListener("submit", saveProjectManager);
+  });
+  document.querySelectorAll("[data-row-editor]").forEach((form) => {
+    form.addEventListener("submit", saveDataRow);
+  });
   document.querySelector(".inspection-form")?.addEventListener("submit", saveInspection);
   document.querySelector(".attachment-dock")?.addEventListener("submit", saveInspection);
   document.querySelectorAll("[data-editor]").forEach((form) => {
@@ -669,6 +702,17 @@ function selectEquipment(equipmentId) {
   const point = state.data.points.find((item) => item.equipmentId === equipmentId);
   const record = state.data.records.find((item) => item.equipmentId === equipmentId && item.pointId === point?.id);
   setState({ selectedEquipmentId: equipmentId, selectedPointId: point?.id || "", selectedRecordId: record?.id || "" });
+}
+
+function updateAdminFilter(field) {
+  const patch = {};
+  if (field.dataset.adminFilter === "project") {
+    patch.adminProjectId = field.value;
+    patch.adminEquipmentId = "";
+  }
+  if (field.dataset.adminFilter === "equipment") patch.adminEquipmentId = field.value;
+  if (field.dataset.adminFilter === "search") patch.adminSearch = field.value;
+  setState(patch);
 }
 
 async function saveInspection(event) {
@@ -773,6 +817,36 @@ async function saveAdminEditor(event) {
   }
 }
 
+async function saveProjectManager(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.id = form.dataset.projectManager;
+  try {
+    const response = await apiPost("/admin/project", payload);
+    setData(response);
+    flash(t("updateSuccess"));
+  } catch {
+    flash(t("serverOffline"));
+  }
+}
+
+async function saveDataRow(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.recordId = form.dataset.recordId;
+  payload.equipmentId = form.dataset.equipmentId;
+  payload.pointId = form.dataset.pointId;
+  try {
+    const response = await apiPost("/admin/row", payload);
+    setData(response);
+    flash(t("rowSaved"));
+  } catch {
+    flash(t("serverOffline"));
+  }
+}
+
 function translateComment() {
   const textarea = document.querySelector("textarea[name='comments']");
   if (!textarea?.value.trim()) return;
@@ -801,6 +875,32 @@ function getFilteredRecords() {
 
 function getVisibleEquipment() {
   return state.data.equipment.filter((item) => item.locationId === state.selectedLocationId && item.team === state.selectedTeam);
+}
+
+function getAdminFilteredEquipmentOptions() {
+  const projectId = state.adminProjectId || state.selectedProjectId;
+  return state.data.equipment.filter((item) => item.projectId === projectId);
+}
+
+function getAdminRows() {
+  const projectId = state.adminProjectId || state.selectedProjectId;
+  const search = String(state.adminSearch || "").trim().toLowerCase();
+  return state.data.records
+    .map((record) => ({
+      record,
+      equipment: state.data.equipment.find((item) => item.id === record.equipmentId),
+      point: state.data.points.find((item) => item.id === record.pointId)
+    }))
+    .filter((row) => row.equipment && row.point)
+    .filter((row) => row.equipment.projectId === projectId)
+    .filter((row) => !state.adminEquipmentId || row.equipment.id === state.adminEquipmentId)
+    .filter((row) => {
+      if (!search) return true;
+      return [row.equipment.name, row.equipment.type, row.equipment.team, row.point.name, row.point.type, row.point.reference, row.record.assignee]
+        .join(" ")
+        .toLowerCase()
+        .includes(search);
+    });
 }
 
 function getCommentSuggestions() {

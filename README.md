@@ -6,10 +6,10 @@ Offline-first web prototype for ELV/BMS project acceptance, inspection records, 
 
 - Mobile-friendly project, location, team/category, equipment, and inspection flow
 - Field workflow with project/location/team filters, equipment cards, point action list, quick Pass/Fail/N/A, and shared comment suggestions
-- Desktop dashboard with project progress, open issues, and person statistics
+- PM-style admin command center with per-project equipment, point, inspection, issue, completion, and manager tracking
 - English-first UI with Traditional Chinese toggle
 - Equipment, point, and sub-device hierarchy for BMS/ELV inspections
-- Admin equipment manager with Excel import, template download, and direct web edit/update
+- Admin equipment manager with Excel import, template download, direct web edit/update, and Excel-like row editing
 - Local browser storage for records, camera photos, and file attachments
 - Offline status indicator, pending-sync queue, and API-backed sync
 - PWA manifest and service worker cache for offline loading
@@ -32,9 +32,10 @@ The API runs at `http://127.0.0.1:4177/api`.
 Use the Admin tab for small projects or quick edits:
 
 - Add equipment directly from the web form
-- Edit equipment project, location, team, name, type, and status
-- Add points/sub-devices under each equipment item
-- Edit point name, type, reference, and status
+- Filter by project and equipment
+- Edit one point/sub-device per row in an Excel-like table
+- Update project manager ownership
+- Edit project, location, team, equipment, point, reference, assignee, due date, and status
 
 Changes are saved to the local API database at `data/db.json`.
 

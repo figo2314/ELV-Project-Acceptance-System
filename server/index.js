@@ -157,6 +157,65 @@ app.post("/api/admin/equipment", async (request, response) => {
   response.json(db);
 });
 
+app.post("/api/admin/project", async (request, response) => {
+  const db = await readDb();
+  const body = request.body || {};
+  const index = db.projects.findIndex((item) => item.id === body.id);
+  if (index === -1) {
+    response.status(404).json({ error: "Project not found." });
+    return;
+  }
+  db.projects[index] = {
+    ...db.projects[index],
+    name: body.name || db.projects[index].name,
+    client: body.client ?? db.projects[index].client,
+    manager: body.manager ?? db.projects[index].manager
+  };
+  await writeDb(db);
+  response.json(db);
+});
+
+app.post("/api/admin/row", async (request, response) => {
+  const db = await readDb();
+  const body = request.body || {};
+  const equipment = db.equipment.find((item) => item.id === body.equipmentId);
+  const point = db.points.find((item) => item.id === body.pointId);
+  const record = db.records.find((item) => item.id === body.recordId);
+  if (!equipment || !point || !record) {
+    response.status(404).json({ error: "Row target not found." });
+    return;
+  }
+
+  equipment.projectId = body.projectId || equipment.projectId;
+  equipment.locationId = body.locationId || equipment.locationId;
+  equipment.team = body.team || equipment.team;
+  equipment.name = body.equipmentName || equipment.name;
+  equipment.type = body.equipmentType || equipment.type;
+
+  point.name = body.pointName || point.name;
+  point.type = body.pointType || point.type;
+  point.reference = body.reference ?? point.reference;
+  point.status = body.status || point.status;
+
+  record.projectId = equipment.projectId;
+  record.locationId = equipment.locationId;
+  record.team = equipment.team;
+  record.equipmentId = equipment.id;
+  record.pointId = point.id;
+  record.title = `${equipment.name} - ${point.name}`;
+  record.assignee = body.assignee ?? record.assignee;
+  record.due = body.due ?? record.due;
+  record.status = body.status || record.status;
+  record.result = resultFromStatus(record.status);
+  record.sync = "synced";
+  record.updatedAt = new Date().toLocaleString("sv-SE");
+  record.serverUpdatedAt = Date.now();
+
+  refreshDerivedStatuses(db);
+  await writeDb(db);
+  response.json(db);
+});
+
 app.post("/api/admin/point", async (request, response) => {
   const db = await readDb();
   const body = request.body || {};
@@ -342,4 +401,12 @@ function summarizeStatus(records) {
   if (records.some((record) => record.status === "rectification")) return "rectification";
   if (records.every((record) => ["passed", "closed"].includes(record.status))) return "passed";
   return "pending";
+}
+
+function resultFromStatus(status) {
+  if (status === "passed") return "Pass";
+  if (status === "failed") return "Fail";
+  if (status === "closed") return "N/A";
+  if (status === "rectification") return "Rectification";
+  return "Pending";
 }
