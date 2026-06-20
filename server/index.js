@@ -10,6 +10,19 @@ const rootDir = path.resolve(__dirname, "..");
 const dataDir = path.join(rootDir, "data");
 const dbPath = path.join(dataDir, "db.json");
 const port = Number(process.env.API_PORT || 4177);
+let dbWriteQueue = Promise.resolve();
+let dbMutationQueue = Promise.resolve();
+
+const projectAliases = ["Project", "項目", "项目"];
+const locationAliases = ["Location", "Area", "位置", "地點", "地点"];
+const teamAliases = ["Team", "Category", "System", "團隊", "团队", "分類", "分类", "系統", "系统"];
+const equipmentNameAliases = ["Equipment", "Equipment Name", "Name", "Device", "設備", "设备", "設備名稱", "设备名称"];
+const equipmentTypeAliases = ["Type", "Equipment Type", "類型", "类型", "設備類型", "设备类型"];
+const pointNameAliases = ["Point", "Point Name", "Sub Device", "點位", "点位", "子設備", "子设备"];
+const pointTypeAliases = ["Point Type", "Signal Type", "點位類型", "点位类型", "信號類型", "信号类型"];
+const referenceAliases = ["Reference", "Expected", "參考值", "参考值", "標準", "标准"];
+const assigneeAliases = ["Assignee", "Owner", "負責人", "负责人"];
+const dueAliases = ["Due", "Target Date", "目標日期", "目标日期"];
 
 const app = express();
 app.use((request, response, next) => {
@@ -85,198 +98,193 @@ app.get("/api/template/equipment", (_request, response) => {
 
 app.post("/api/sync", async (request, response) => {
   const incoming = Array.isArray(request.body.records) ? request.body.records : [];
-  const db = await readDb();
   const conflicts = [];
+  const db = await withDbMutation(async (db) => {
+    for (const record of incoming) {
+      const index = db.records.findIndex((item) => item.id === record.id);
+      const nextRecord = { ...record, sync: "synced", serverUpdatedAt: Date.now() };
+      if (index === -1) {
+        db.records.push(nextRecord);
+        continue;
+      }
 
-  for (const record of incoming) {
-    const index = db.records.findIndex((item) => item.id === record.id);
-    const nextRecord = { ...record, sync: "synced", serverUpdatedAt: Date.now() };
-    if (index === -1) {
-      db.records.push(nextRecord);
-      continue;
+      const current = db.records[index];
+      const serverTime = Number(current.serverUpdatedAt || 0);
+      if (record.baseServerUpdatedAt && Number(record.baseServerUpdatedAt) < serverTime) {
+        conflicts.push({ local: record, server: current });
+        continue;
+      }
+      db.records[index] = nextRecord;
     }
 
-    const current = db.records[index];
-    const serverTime = Number(current.serverUpdatedAt || 0);
-    if (record.baseServerUpdatedAt && Number(record.baseServerUpdatedAt) < serverTime) {
-      conflicts.push({ local: record, server: current });
-      continue;
-    }
-    db.records[index] = nextRecord;
-  }
-
-  refreshDerivedStatuses(db);
-  await writeDb(db);
+    return db;
+  });
   response.json({ ...db, conflicts });
 });
 
 app.post("/api/equipment", async (request, response) => {
-  const db = await readDb();
-  const equipment = {
-    id: request.body.id || createId("eq"),
-    projectId: request.body.projectId,
-    locationId: request.body.locationId,
-    team: request.body.team || "BMS",
-    name: request.body.name,
-    type: request.body.type || "Equipment",
-    status: request.body.status || "pending"
-  };
-  db.equipment.push(equipment);
-  await writeDb(db);
+  const equipment = await withDbMutation(async (db) => {
+    const item = {
+      id: request.body.id || createId("eq"),
+      projectId: request.body.projectId,
+      locationId: request.body.locationId,
+      team: request.body.team || "BMS",
+      name: request.body.name,
+      type: request.body.type || "Equipment",
+      status: request.body.status || "pending"
+    };
+    db.equipment.push(item);
+    return item;
+  });
   response.status(201).json(equipment);
 });
 
 app.post("/api/admin/equipment", async (request, response) => {
-  const db = await readDb();
   const body = request.body || {};
-  const equipment = {
-    id: body.id || createId("e"),
-    projectId: body.projectId || db.projects[0]?.id,
-    locationId: body.locationId || db.locations[0]?.id,
-    team: body.team || "BMS",
-    name: body.name || "New Equipment",
-    type: body.type || "Equipment",
-    status: body.status || "pending"
-  };
-  const index = db.equipment.findIndex((item) => item.id === equipment.id);
-  if (index === -1) {
-    db.equipment.push(equipment);
-  } else {
-    db.equipment[index] = { ...db.equipment[index], ...equipment };
-  }
+  const db = await withDbMutation(async (db) => {
+    const equipment = {
+      id: body.id || createId("e"),
+      projectId: body.projectId || db.projects[0]?.id,
+      locationId: body.locationId || db.locations[0]?.id,
+      team: body.team || "BMS",
+      name: body.name || "New Equipment",
+      type: body.type || "Equipment",
+      status: body.status || "pending"
+    };
+    const index = db.equipment.findIndex((item) => item.id === equipment.id);
+    if (index === -1) {
+      db.equipment.push(equipment);
+    } else {
+      db.equipment[index] = { ...db.equipment[index], ...equipment };
+    }
 
-  for (const record of db.records.filter((item) => item.equipmentId === equipment.id)) {
-    record.projectId = equipment.projectId;
-    record.locationId = equipment.locationId;
-    record.team = equipment.team;
-    record.serverUpdatedAt = Date.now();
-  }
+    for (const record of db.records.filter((item) => item.equipmentId === equipment.id)) {
+      record.projectId = equipment.projectId;
+      record.locationId = equipment.locationId;
+      record.team = equipment.team;
+      record.serverUpdatedAt = Date.now();
+    }
 
-  refreshDerivedStatuses(db);
-  await writeDb(db);
+    return db;
+  });
   response.json(db);
 });
 
 app.post("/api/admin/project", async (request, response) => {
-  const db = await readDb();
   const body = request.body || {};
-  const index = db.projects.findIndex((item) => item.id === body.id);
-  if (index === -1) {
-    response.status(404).json({ error: "Project not found." });
-    return;
-  }
-  db.projects[index] = {
-    ...db.projects[index],
-    name: body.name || db.projects[index].name,
-    client: body.client ?? db.projects[index].client,
-    manager: body.manager ?? db.projects[index].manager
-  };
-  await writeDb(db);
-  response.json(db);
+  const result = await withDbMutation(async (db) => {
+    const index = db.projects.findIndex((item) => item.id === body.id);
+    if (index === -1) return mutationError(404, "Project not found.");
+    db.projects[index] = {
+      ...db.projects[index],
+      name: body.name || db.projects[index].name,
+      client: body.client ?? db.projects[index].client,
+      manager: body.manager ?? db.projects[index].manager
+    };
+    return db;
+  });
+  if (sendMutationError(response, result)) return;
+  response.json(result);
 });
 
 app.post("/api/admin/row", async (request, response) => {
-  const db = await readDb();
   const body = request.body || {};
-  const equipment = db.equipment.find((item) => item.id === body.equipmentId);
-  const point = db.points.find((item) => item.id === body.pointId);
-  const record = db.records.find((item) => item.id === body.recordId);
-  if (!equipment || !point || !record) {
-    response.status(404).json({ error: "Row target not found." });
-    return;
-  }
+  const result = await withDbMutation(async (db) => {
+    const equipment = db.equipment.find((item) => item.id === body.equipmentId);
+    const point = db.points.find((item) => item.id === body.pointId);
+    const record = db.records.find((item) => item.id === body.recordId);
+    if (!equipment || !point || !record) return mutationError(404, "Row target not found.");
 
-  equipment.projectId = body.projectId || equipment.projectId;
-  equipment.locationId = body.locationId || equipment.locationId;
-  equipment.team = body.team || equipment.team;
-  equipment.name = body.equipmentName || equipment.name;
-  equipment.type = body.equipmentType || equipment.type;
+    equipment.projectId = body.projectId || equipment.projectId;
+    equipment.locationId = body.locationId || equipment.locationId;
+    equipment.team = body.team || equipment.team;
+    equipment.name = body.equipmentName || equipment.name;
+    equipment.type = body.equipmentType || equipment.type;
 
-  point.name = body.pointName || point.name;
-  point.type = body.pointType || point.type;
-  point.reference = body.reference ?? point.reference;
-  point.status = body.status || point.status;
+    point.name = body.pointName || point.name;
+    point.type = body.pointType || point.type;
+    point.reference = body.reference ?? point.reference;
+    point.status = body.status || point.status;
 
-  record.projectId = equipment.projectId;
-  record.locationId = equipment.locationId;
-  record.team = equipment.team;
-  record.equipmentId = equipment.id;
-  record.pointId = point.id;
-  record.title = `${equipment.name} - ${point.name}`;
-  record.assignee = body.assignee ?? record.assignee;
-  record.due = body.due ?? record.due;
-  record.status = body.status || record.status;
-  record.result = resultFromStatus(record.status);
-  record.sync = "synced";
-  record.updatedAt = new Date().toLocaleString("sv-SE");
-  record.serverUpdatedAt = Date.now();
+    record.projectId = equipment.projectId;
+    record.locationId = equipment.locationId;
+    record.team = equipment.team;
+    record.equipmentId = equipment.id;
+    record.pointId = point.id;
+    record.title = `${equipment.name} - ${point.name}`;
+    record.assignee = body.assignee ?? record.assignee;
+    record.due = body.due ?? record.due;
+    record.status = body.status || record.status;
+    record.result = resultFromStatus(record.status);
+    record.sync = "synced";
+    record.updatedAt = new Date().toLocaleString("sv-SE");
+    record.serverUpdatedAt = Date.now();
 
-  refreshDerivedStatuses(db);
-  await writeDb(db);
-  response.json(db);
+    return db;
+  });
+  if (sendMutationError(response, result)) return;
+  response.json(result);
 });
 
 app.post("/api/admin/point", async (request, response) => {
-  const db = await readDb();
   const body = request.body || {};
-  const equipment = db.equipment.find((item) => item.id === body.equipmentId);
-  if (!equipment) {
-    response.status(404).json({ error: "Equipment not found." });
-    return;
-  }
+  const result = await withDbMutation(async (db) => {
+    const equipment = db.equipment.find((item) => item.id === body.equipmentId);
+    if (!equipment) return mutationError(404, "Equipment not found.");
 
-  const point = {
-    id: body.id || createId("pt"),
-    equipmentId: equipment.id,
-    name: body.name || "New Point",
-    type: body.type || "Point",
-    reference: body.reference || "",
-    status: body.status || "pending"
-  };
-  const pointIndex = db.points.findIndex((item) => item.id === point.id);
-  if (pointIndex === -1) {
-    db.points.push(point);
-  } else {
-    db.points[pointIndex] = { ...db.points[pointIndex], ...point };
-  }
-
-  const recordTitle = `${equipment.name} - ${point.name}`;
-  const recordIndex = db.records.findIndex((item) => item.pointId === point.id);
-  if (recordIndex === -1) {
-    db.records.push({
-      id: createId("r"),
-      projectId: equipment.projectId,
-      locationId: equipment.locationId,
-      team: equipment.team,
+    const point = {
+      id: body.id || createId("pt"),
       equipmentId: equipment.id,
-      pointId: point.id,
-      title: recordTitle,
-      status: point.status,
-      result: point.status === "passed" ? "Pass" : point.status === "failed" ? "Fail" : "Pending",
-      comments: "",
-      photos: [],
-      assignee: body.assignee || "",
-      due: body.due || "",
-      sync: "synced",
-      updatedAt: new Date().toLocaleString("sv-SE"),
-      serverUpdatedAt: Date.now()
-    });
-  } else {
-    db.records[recordIndex] = {
-      ...db.records[recordIndex],
-      title: recordTitle,
-      status: point.status,
-      result: resultFromStatus(point.status),
-      assignee: body.assignee ?? db.records[recordIndex].assignee,
-      due: body.due ?? db.records[recordIndex].due,
-      updatedAt: new Date().toLocaleString("sv-SE"),
-      serverUpdatedAt: Date.now()
+      name: body.name || "New Point",
+      type: body.type || "Point",
+      reference: body.reference || "",
+      status: body.status || "pending"
     };
-  }
+    const pointIndex = db.points.findIndex((item) => item.id === point.id);
+    if (pointIndex === -1) {
+      db.points.push(point);
+    } else {
+      db.points[pointIndex] = { ...db.points[pointIndex], ...point };
+    }
 
-  refreshDerivedStatuses(db);
-  await writeDb(db);
-  response.json(db);
+    const recordTitle = `${equipment.name} - ${point.name}`;
+    const recordIndex = db.records.findIndex((item) => item.pointId === point.id);
+    if (recordIndex === -1) {
+      db.records.push({
+        id: createId("r"),
+        projectId: equipment.projectId,
+        locationId: equipment.locationId,
+        team: equipment.team,
+        equipmentId: equipment.id,
+        pointId: point.id,
+        title: recordTitle,
+        status: point.status,
+        result: point.status === "passed" ? "Pass" : point.status === "failed" ? "Fail" : "Pending",
+        comments: "",
+        photos: [],
+        assignee: body.assignee || "",
+        due: body.due || "",
+        sync: "synced",
+        updatedAt: new Date().toLocaleString("sv-SE"),
+        serverUpdatedAt: Date.now()
+      });
+    } else {
+      db.records[recordIndex] = {
+        ...db.records[recordIndex],
+        title: recordTitle,
+        status: point.status,
+        result: resultFromStatus(point.status),
+        assignee: body.assignee ?? db.records[recordIndex].assignee,
+        due: body.due ?? db.records[recordIndex].due,
+        updatedAt: new Date().toLocaleString("sv-SE"),
+        serverUpdatedAt: Date.now()
+      };
+    }
+
+    return db;
+  });
+  if (sendMutationError(response, result)) return;
+  response.json(result);
 });
 
 app.post("/api/import/equipment", async (request, response) => {
@@ -289,93 +297,124 @@ app.post("/api/import/equipment", async (request, response) => {
   const workbook = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer" });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-  const db = await readDb();
   const imported = [];
 
-  for (const row of rows) {
-    const name = pick(row, ["Equipment", "Equipment Name", "Name", "Device", "設備", "设备", "設備名稱", "设备名称"]);
-    if (!name) continue;
-    const projectName = pick(row, ["Project", "項目", "项目"]) || db.projects[0]?.name || "Default Project";
-    const locationName = pick(row, ["Location", "Area", "位置", "地點", "地点"]) || "Unassigned";
-    const team = pick(row, ["Team", "Category", "System", "團隊", "团队", "分類", "分类", "系統", "系统"]) || "BMS";
-    const type = pick(row, ["Type", "Equipment Type", "類型", "类型", "設備類型", "设备类型"]) || "Equipment";
-    const pointName = pick(row, ["Point", "Point Name", "Sub Device", "點位", "点位", "子設備", "子设备"]);
-    const pointType = pick(row, ["Point Type", "Signal Type", "點位類型", "点位类型", "信號類型", "信号类型"]) || "Point";
-    const reference = pick(row, ["Reference", "Expected", "參考值", "参考值", "標準", "标准"]) || "";
-    const assignee = pick(row, ["Assignee", "Owner", "負責人", "负责人"]) || "";
-    const due = pick(row, ["Due", "Target Date", "目標日期", "目标日期"]) || "";
+  const db = await withDbMutation(async (db) => {
+    for (const row of rows) {
+      const name = pick(row, equipmentNameAliases);
+      if (!name) continue;
+      const projectName = pick(row, projectAliases) || db.projects[0]?.name || "Default Project";
+      const locationName = pick(row, locationAliases) || "Unassigned";
+      const team = pick(row, teamAliases) || "BMS";
+      const type = pick(row, equipmentTypeAliases) || "Equipment";
+      const pointName = pick(row, pointNameAliases);
+      const pointType = pick(row, pointTypeAliases) || "Point";
+      const reference = pick(row, referenceAliases) || "";
+      const assignee = pick(row, assigneeAliases) || "";
+      const due = pick(row, dueAliases) || "";
 
-    const project = upsertByName(db.projects, { id: createId("p"), name: projectName, client: "" });
-    const location = upsertLocation(db.locations, { id: createId("l"), projectId: project.id, name: locationName });
-    let item = db.equipment.find((candidate) => candidate.name === name && candidate.locationId === location.id);
-    if (!item) {
-      item = { id: createId("e"), projectId: project.id, locationId: location.id, team, name, type, status: "pending" };
-      db.equipment.push(item);
-    } else {
-      item.projectId = project.id;
-      item.locationId = location.id;
-      item.team = team;
-      item.type = type;
-    }
-
-    if (pointName) {
-      let point = db.points.find((candidate) => candidate.equipmentId === item.id && candidate.name.trim().toLowerCase() === pointName.trim().toLowerCase());
-      if (!point) {
-        point = { id: createId("pt"), equipmentId: item.id, name: pointName, type: pointType, reference, status: "pending" };
-        db.points.push(point);
+      const project = upsertByName(db.projects, { id: createId("p"), name: projectName, client: "" });
+      const location = upsertLocation(db.locations, { id: createId("l"), projectId: project.id, name: locationName });
+      let item = db.equipment.find((candidate) => candidate.name === name && candidate.locationId === location.id);
+      if (!item) {
+        item = { id: createId("e"), projectId: project.id, locationId: location.id, team, name, type, status: "pending" };
+        db.equipment.push(item);
       } else {
-        point.type = pointType;
-        point.reference = reference;
+        item.projectId = project.id;
+        item.locationId = location.id;
+        item.team = team;
+        item.type = type;
       }
 
-      const recordIndex = db.records.findIndex((candidate) => candidate.pointId === point.id);
-      const nextRecord = {
-        projectId: project.id,
-        locationId: location.id,
-        team,
-        equipmentId: item.id,
-        pointId: point.id,
-        title: `${name} - ${pointName}`,
-        status: point.status || "pending",
-        result: resultFromStatus(point.status || "pending"),
-        assignee,
-        due,
-        sync: "synced",
-        updatedAt: new Date().toLocaleString("sv-SE"),
-        serverUpdatedAt: Date.now()
-      };
-      if (recordIndex === -1) {
-        db.records.push({ id: createId("r"), comments: "", photos: [], ...nextRecord });
-      } else {
-        db.records[recordIndex] = {
-          ...db.records[recordIndex],
-          ...nextRecord,
-          comments: db.records[recordIndex].comments || "",
-          photos: db.records[recordIndex].photos || []
+      if (pointName) {
+        let point = db.points.find((candidate) => candidate.equipmentId === item.id && candidate.name.trim().toLowerCase() === pointName.trim().toLowerCase());
+        if (!point) {
+          point = { id: createId("pt"), equipmentId: item.id, name: pointName, type: pointType, reference, status: "pending" };
+          db.points.push(point);
+        } else {
+          point.type = pointType;
+          point.reference = reference;
+        }
+
+        const recordIndex = db.records.findIndex((candidate) => candidate.pointId === point.id);
+        const existingRecord = recordIndex === -1 ? null : db.records[recordIndex];
+        const status = point.status || existingRecord?.status || "pending";
+        const nextRecord = {
+          projectId: project.id,
+          locationId: location.id,
+          team,
+          equipmentId: item.id,
+          pointId: point.id,
+          title: `${name} - ${pointName}`,
+          status,
+          result: resultFromStatus(status),
+          assignee: assignee || existingRecord?.assignee || "",
+          due: due || existingRecord?.due || "",
+          sync: "synced",
+          updatedAt: new Date().toLocaleString("sv-SE"),
+          serverUpdatedAt: Date.now()
         };
+        if (recordIndex === -1) {
+          db.records.push({ id: createId("r"), comments: "", photos: [], ...nextRecord });
+        } else {
+          db.records[recordIndex] = {
+            ...existingRecord,
+            ...nextRecord,
+            comments: existingRecord.comments || "",
+            photos: existingRecord.photos || []
+          };
+        }
       }
+      imported.push(item);
     }
-    imported.push(item);
-  }
 
-  refreshDerivedStatuses(db);
-  await writeDb(db);
+    return db;
+  });
   response.json({ fileName, importedCount: imported.length, data: db });
 });
+
 app.listen(port, () => {
   console.log(`ELV acceptance API listening on http://127.0.0.1:${port}`);
 });
 
 async function readDb() {
+  await dbWriteQueue.catch(() => {});
   await mkdir(dataDir, { recursive: true });
   if (!existsSync(dbPath)) {
-    await writeFile(dbPath, JSON.stringify({ version: 1, projects: [], locations: [], equipment: [], points: [], records: [] }, null, 2));
+    await writeFile(dbPath, `${JSON.stringify({ version: 1, projects: [], locations: [], equipment: [], points: [], records: [] }, null, 2)}\n`);
   }
-  return JSON.parse(await readFile(dbPath, "utf8"));
+  const content = await readFile(dbPath, "utf8");
+  return JSON.parse(content.replace(/^\uFEFF/, ""));
 }
 
 async function writeDb(db) {
-  await writeFile(dbPath, `${JSON.stringify(db, null, 2)}\n`);
+  dbWriteQueue = dbWriteQueue.catch(() => {}).then(() => writeFile(dbPath, `${JSON.stringify(db, null, 2)}\n`));
+  await dbWriteQueue;
+}
+
+async function withDbMutation(handler) {
+  const run = dbMutationQueue
+    .catch(() => {})
+    .then(async () => {
+      const db = await readDb();
+      const result = await handler(db);
+      if (result?.mutationError) return result;
+      refreshDerivedStatuses(db);
+      await writeDb(db);
+      return result ?? db;
+    });
+  dbMutationQueue = run;
+  return run;
+}
+
+function mutationError(status, message) {
+  return { mutationError: true, status, error: message };
+}
+
+function sendMutationError(response, result) {
+  if (!result?.mutationError) return false;
+  response.status(result.status || 500).json({ error: result.error || "Database mutation failed." });
+  return true;
 }
 
 function createId(prefix) {

@@ -523,8 +523,8 @@ function renderPointActionRow(point) {
       </button>
       <span class="badge ${record?.status || point.status}">${statusLabel(record?.status || point.status)}</span>
       <div class="quick-actions">
-        ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}">${result}</button>`).join("")}
-        <button class="ghost compact" data-comment-record="${record?.id || ""}">${t("addComment")}</button>
+        ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}" ${record ? "" : "disabled"}>${result}</button>`).join("")}
+        <button class="ghost compact" data-comment-record="${record?.id || ""}" ${record ? "" : "disabled"}>${t("addComment")}</button>
         <button class="ghost compact" data-edit-point="${point.id}">${t("editPoint")}</button>
       </div>
       <div class="comment-panel ${isSelected ? "show" : ""}">
@@ -1333,16 +1333,28 @@ async function saveInspection(event) {
 }
 
 async function updateRecordQuick(recordId, result) {
+  if (!recordId || !state.data.records.some((record) => record.id === recordId)) {
+    flash(t("noRecord"));
+    return;
+  }
   updateRecord(recordId, { result, status: statusFromResult(result) });
   await syncRecords(false);
 }
 
 async function updateRecordComment(recordId, comments) {
+  if (!recordId || !state.data.records.some((record) => record.id === recordId)) {
+    flash(t("noRecord"));
+    return;
+  }
   updateRecord(recordId, { comments });
   await syncRecords(false);
 }
 
 function updateRecord(recordId, patch) {
+  if (!recordId || !state.data.records.some((record) => record.id === recordId)) {
+    flash(t("noRecord"));
+    return false;
+  }
   const now = new Date();
   const records = state.data.records.map((record) => {
     if (record.id !== recordId) return record;
@@ -1358,6 +1370,7 @@ function updateRecord(recordId, patch) {
   const data = refreshLocalStatuses({ ...state.data, records });
   setState({ data, selectedRecordId: recordId, toast: t("success") });
   window.setTimeout(() => setState({ toast: "" }), 1600);
+  return true;
 }
 
 async function syncRecords(showToast) {
