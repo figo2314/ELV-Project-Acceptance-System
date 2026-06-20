@@ -331,6 +331,7 @@ function defaultState() {
     collapsedTreeNodes: [],
     adminTreeWidth: null,
     adminTreeWidthManual: false,
+    adminColumnWidths: null,
     dashboardFilter: "all",
     selectedIssueId: "",
     importPreview: null,
@@ -1277,23 +1278,57 @@ function renderDataTable() {
   const tableClasses = ["excel-table"];
   if (isAdminProjectFixed()) tableClasses.push("hide-project");
   if (state.adminTreeSelection || state.adminProjectId) tableClasses.push("compact-location");
+  const columns = getAdminTableColumns();
   return `
     <div class="excel-table-wrap">
-      <div class="${tableClasses.join(" ")}">
+      ${state.adminColumnWidths ? `<button class="column-auto-width" data-column-auto-width title="Reset table column widths">Auto columns</button>` : ""}
+      <div class="${tableClasses.join(" ")}" style="${getAdminColumnStyle()}">
         <div class="excel-row excel-head">
-          <span title="${t("project")}">${t("project")}</span>
-          <span title="${t("equipmentName")}">${t("equipmentName")} & Context</span>
-          <span title="${t("pointName")}">Point Name</span>
-          <span title="${t("pointType")}">Point Type</span>
-          <span title="${t("reference")}">${t("reference")}</span>
-          <span title="${t("assignee")}">${t("assignee")}</span>
-          <span title="${t("status")}">${t("status")}</span>
-          <span></span>
+          ${columns.map((column, index) => renderColumnHeader(column, index)).join("")}
         </div>
         ${getAdminRows().map(renderDataRow).join("")}
       </div>
     </div>
   `;
+}
+
+function renderColumnHeader(column, index) {
+  return `
+    <span title="${escapeHtml(column.label)}" data-column-key="${column.key}">
+      ${escapeHtml(column.label)}
+      ${column.resizable ? `<i class="column-resize-handle" data-column-resize="${index}" title="Resize column"></i>` : ""}
+    </span>
+  `;
+}
+
+function getAdminTableColumns() {
+  const hideProject = isAdminProjectFixed();
+  const compactLocation = Boolean(state.adminTreeSelection || state.adminProjectId);
+  return [
+    { key: "project", label: t("project"), auto: hideProject ? "0" : "140px", min: hideProject ? 0 : 120, resizable: !hideProject },
+    { key: "equipment", label: `${t("equipmentName")} & Context`, auto: compactLocation ? "minmax(340px, 1.45fr)" : "minmax(300px, 1.35fr)", min: 240, resizable: true },
+    { key: "point", label: "Point Name", auto: compactLocation ? "minmax(420px, 1.85fr)" : "minmax(360px, 1.65fr)", min: 260, resizable: true },
+    { key: "pointType", label: "Point Type", auto: "112px", min: 96, resizable: true },
+    { key: "reference", label: t("reference"), auto: compactLocation ? "minmax(220px, 0.9fr)" : "minmax(210px, 0.85fr)", min: 160, resizable: true },
+    { key: "assignee", label: t("assignee"), auto: "96px", min: 84, resizable: true },
+    { key: "status", label: t("status"), auto: "104px", min: 96, resizable: true },
+    { key: "save", label: "", auto: "72px", min: 68, resizable: false }
+  ];
+}
+
+function getAdminColumnStyle() {
+  return `--admin-grid:${getAdminColumnTemplate(state.adminColumnWidths)}`;
+}
+
+function getAdminColumnTemplate(widths) {
+  return getAdminTableColumns().map((column) => (column.resizable && widths?.[column.key] ? `${widths[column.key]}px` : column.auto)).join(" ");
+}
+
+function resizeAdminColumn(index, width) {
+  const column = getAdminTableColumns()[index];
+  if (!column || !column.resizable) return;
+  const nextWidth = Math.max(column.min, Math.min(640, Math.round(width)));
+  setState({ adminColumnWidths: { ...(state.adminColumnWidths || {}), [column.key]: nextWidth } }, false);
 }
 
 function renderDataRow(row) {
@@ -1514,6 +1549,10 @@ function bindEvents() {
   });
   document.querySelector("[data-tree-resize]")?.addEventListener("pointerdown", startTreeResize);
   document.querySelector("[data-tree-auto-width]")?.addEventListener("click", () => setState({ adminTreeWidth: null, adminTreeWidthManual: false }));
+  document.querySelector("[data-column-auto-width]")?.addEventListener("click", () => setState({ adminColumnWidths: null }));
+  document.querySelectorAll("[data-column-resize]").forEach((handle) => {
+    handle.addEventListener("pointerdown", startColumnResize);
+  });
   document.querySelectorAll("[data-tree-node]").forEach((node) => {
     node.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(node.dataset.treeNode))));
     node.addEventListener("keydown", (event) => {
@@ -1624,6 +1663,34 @@ function startTreeResize(event) {
     document.removeEventListener("pointerup", stop);
     document.body.classList.remove("resizing-tree");
     setState({ adminTreeWidth: nextWidth, adminTreeWidthManual: true }, false);
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", stop);
+}
+
+function startColumnResize(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const index = Number(event.currentTarget.dataset.columnResize);
+  const header = event.currentTarget.closest("[data-column-key]");
+  const table = event.currentTarget.closest(".excel-table");
+  if (!header || !table || Number.isNaN(index)) return;
+  const column = getAdminTableColumns()[index];
+  const startX = event.clientX;
+  const startWidth = header.getBoundingClientRect().width;
+  let nextWidth = startWidth;
+  document.body.classList.add("resizing-column");
+  const move = (moveEvent) => {
+    nextWidth = Math.max(column.min, Math.min(640, Math.round(startWidth + moveEvent.clientX - startX)));
+    const widths = { ...(state.adminColumnWidths || {}) };
+    widths[column.key] = nextWidth;
+    table.style.setProperty("--admin-grid", getAdminColumnTemplate(widths));
+  };
+  const stop = () => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", stop);
+    document.body.classList.remove("resizing-column");
+    resizeAdminColumn(index, nextWidth);
   };
   document.addEventListener("pointermove", move);
   document.addEventListener("pointerup", stop);

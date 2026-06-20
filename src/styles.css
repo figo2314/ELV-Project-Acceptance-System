@@ -1844,6 +1844,7 @@ button.kpi-card.active {
   box-shadow: inset 0 1px 0 #fff;
   max-width: 100%;
   overflow: auto;
+  position: relative;
 }
 
 .excel-table {
@@ -1853,23 +1854,11 @@ button.kpi-card.active {
 .excel-row {
   display: grid;
   gap: 0;
-  grid-template-columns: 140px minmax(300px, 1.35fr) minmax(360px, 1.65fr) 112px minmax(210px, 0.85fr) 96px 104px 72px;
+  grid-template-columns: var(--admin-grid, 140px minmax(300px, 1.35fr) minmax(360px, 1.65fr) 112px minmax(210px, 0.85fr) 96px 104px 72px);
 }
 
 .excel-table.hide-project {
   min-width: 760px;
-}
-
-.excel-table.hide-project .excel-row {
-  grid-template-columns: 0 minmax(330px, 1.45fr) minmax(400px, 1.8fr) 112px minmax(220px, 0.9fr) 96px 104px 72px;
-}
-
-.excel-table.compact-location .excel-row {
-  grid-template-columns: 140px minmax(320px, 1.42fr) minmax(380px, 1.72fr) 112px minmax(220px, 0.9fr) 96px 104px 72px;
-}
-
-.excel-table.hide-project.compact-location .excel-row {
-  grid-template-columns: 0 minmax(360px, 1.55fr) minmax(430px, 1.9fr) 112px minmax(230px, 0.95fr) 96px 104px 72px;
 }
 
 .excel-table.hide-project .excel-row > :first-child {
@@ -2066,6 +2055,62 @@ button.kpi-card.active {
 
 .excel-head > span {
   box-shadow: inset 0 -1px 0 var(--line-strong);
+  position: relative;
+}
+
+.column-resize-handle {
+  bottom: 0;
+  cursor: col-resize;
+  position: absolute;
+  right: -5px;
+  top: 0;
+  width: 10px;
+  z-index: 12;
+}
+
+.column-resize-handle::after {
+  background: #cbd5e1;
+  border-radius: 999px;
+  bottom: 8px;
+  content: "";
+  opacity: 0;
+  position: absolute;
+  right: 4px;
+  top: 8px;
+  transition: opacity 0.16s ease;
+  width: 2px;
+}
+
+.excel-head > span:hover .column-resize-handle::after,
+.resizing-column .column-resize-handle::after {
+  opacity: 1;
+}
+
+.resizing-column {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.column-auto-width {
+  background: #f8fafc;
+  border: 1px solid #dbe5e2;
+  border-radius: 999px;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  min-height: 28px;
+  padding: 0 10px;
+  position: sticky;
+  left: 12px;
+  top: 8px;
+  z-index: 20;
+}
+
+.column-auto-width:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .excel-row .ghost {
