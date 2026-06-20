@@ -978,17 +978,17 @@ function renderDataTable() {
 function renderDataRow(row) {
   return `
     <form class="excel-row" data-row-editor data-record-id="${row.record.id}" data-equipment-id="${row.equipment.id}" data-point-id="${row.point.id}">
-      <select name="projectId">${state.data.projects.map((project) => option(project.id, project.name, row.equipment.projectId)).join("")}</select>
-      <select name="locationId">${state.data.locations.map((location) => option(location.id, location.name, row.equipment.locationId)).join("")}</select>
-      <input name="team" value="${escapeHtml(row.equipment.team)}" />
-      <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" />
-      <input name="equipmentType" value="${escapeHtml(row.equipment.type)}" />
-      <input name="pointName" value="${escapeHtml(row.point.name)}" />
-      <input name="pointType" value="${escapeHtml(row.point.type)}" />
-      <input name="reference" value="${escapeHtml(row.point.reference || "")}" />
-      <input name="assignee" value="${escapeHtml(row.record.assignee || "")}" />
-      <input name="due" value="${escapeHtml(row.record.due || "")}" />
-      <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
+      <select name="projectId" title="${escapeHtml(getProjectName(row.equipment.projectId))}">${state.data.projects.map((project) => option(project.id, project.name, row.equipment.projectId)).join("")}</select>
+      <select name="locationId" title="${escapeHtml(getLocationName(row.equipment.locationId))}">${state.data.locations.map((location) => option(location.id, location.name, row.equipment.locationId)).join("")}</select>
+      <input name="team" value="${escapeHtml(row.equipment.team)}" title="${escapeHtml(row.equipment.team)}" />
+      <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" title="${escapeHtml(row.equipment.name)}" />
+      <input name="equipmentType" value="${escapeHtml(row.equipment.type)}" title="${escapeHtml(row.equipment.type)}" />
+      <input name="pointName" value="${escapeHtml(row.point.name)}" title="${escapeHtml(row.point.name)}" />
+      <input name="pointType" value="${escapeHtml(row.point.type)}" title="${escapeHtml(row.point.type)}" />
+      <input name="reference" value="${escapeHtml(row.point.reference || "")}" title="${escapeHtml(row.point.reference || "")}" />
+      <input name="assignee" value="${escapeHtml(row.record.assignee || "")}" title="${escapeHtml(row.record.assignee || "")}" />
+      <input name="due" value="${escapeHtml(row.record.due || "")}" title="${escapeHtml(row.record.due || "")}" />
+      <select name="status" title="${statusLabel(row.record.status)}">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
       <button class="ghost" type="submit">${t("saveChanges")}</button>
     </form>
   `;
@@ -1493,6 +1493,14 @@ function getVisibleEquipment() {
 function getAdminFilteredEquipmentOptions() {
   const projectId = state.adminProjectId || state.selectedProjectId;
   return state.data.equipment.filter((item) => item.projectId === projectId);
+}
+
+function getProjectName(projectId) {
+  return state.data.projects.find((item) => item.id === projectId)?.name || "";
+}
+
+function getLocationName(locationId) {
+  return state.data.locations.find((item) => item.id === locationId)?.name || "";
 }
 
 function buildLocationTree(projectId) {
