@@ -373,6 +373,7 @@ textarea {
   justify-content: center;
   min-height: 42px;
   padding: 0 14px;
+  text-decoration: none;
 }
 
 .file-button input {

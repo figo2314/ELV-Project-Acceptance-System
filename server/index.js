@@ -32,6 +32,57 @@ app.get("/api/bootstrap", async (_request, response) => {
   response.json(await readDb());
 });
 
+app.get("/api/template/equipment", (_request, response) => {
+  const rows = [
+    {
+      Project: "Harbour Tower BMS Upgrade",
+      Location: "Tower A / 12F / AHU Room",
+      Team: "BMS",
+      Equipment: "DDC-12F-AHU-01",
+      Type: "DDC Panel",
+      Point: "Supply air temperature AI",
+      "Point Type": "Analog Input",
+      Reference: "22-26 C",
+      Assignee: "Ken",
+      Due: "2026-06-28",
+      Notes: "One row creates or updates one equipment point/sub-device inspection item."
+    },
+    {
+      Project: "Harbour Tower BMS Upgrade",
+      Location: "Tower A / 12F / AHU Room",
+      Team: "BMS",
+      Equipment: "DDC-12F-AHU-01",
+      Type: "DDC Panel",
+      Point: "Fan start command DO",
+      "Point Type": "Digital Output",
+      Reference: "Start/Stop command",
+      Assignee: "Ken",
+      Due: "2026-06-28",
+      Notes: "Repeat Equipment with different Point values for multiple points under the same device."
+    }
+  ];
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet["!cols"] = [
+    { wch: 30 },
+    { wch: 32 },
+    { wch: 14 },
+    { wch: 24 },
+    { wch: 18 },
+    { wch: 28 },
+    { wch: 18 },
+    { wch: 24 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 72 }
+  ];
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Equipment Import");
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  response.setHeader("Content-Disposition", "attachment; filename=\"elv-equipment-import-template.xlsx\"");
+  response.send(buffer);
+});
+
 app.post("/api/sync", async (request, response) => {
   const incoming = Array.isArray(request.body.records) ? request.body.records : [];
   const db = await readDb();

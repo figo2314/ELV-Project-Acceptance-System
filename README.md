@@ -28,7 +28,7 @@ The API runs at `http://127.0.0.1:4177/api`.
 
 ## Excel Import
 
-Use the Admin tab and upload `.xlsx`, `.xls`, or `.csv`.
+Use the Admin tab, click `Download Excel Template`, fill it in, then upload `.xlsx`, `.xls`, or `.csv` with `Import Excel`.
 
 Supported column names:
 
@@ -42,6 +42,8 @@ Supported column names:
 - `Reference` / `Expected`
 - `Assignee`
 - `Due` / `Target Date`
+
+Each row represents one point/sub-device under an equipment item. Repeat the same `Equipment` value with different `Point` values to create multiple points under the same device.
 
 ## Build
 

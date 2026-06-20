@@ -46,6 +46,7 @@ const dictionary = {
     syncNow: "Sync Now",
     lastUpdated: "Last updated",
     importExcel: "Import Excel",
+    downloadTemplate: "Download Excel Template",
     templateHint: "Excel columns: Project, Location, Team, Equipment, Type, Point, Point Type, Reference, Assignee, Due",
     equipmentManager: "Equipment Manager",
     pointCount: "Points",
@@ -102,6 +103,7 @@ const dictionary = {
     syncNow: "立即同步",
     lastUpdated: "最後更新",
     importExcel: "導入 Excel",
+    downloadTemplate: "下載 Excel 範本",
     templateHint: "Excel 欄位：Project, Location, Team, Equipment, Type, Point, Point Type, Reference, Assignee, Due",
     equipmentManager: "設備管理",
     pointCount: "點位",
@@ -412,6 +414,7 @@ function renderAdmin() {
         <label class="file-button">${t("importExcel")}
           <input data-action="import-excel" type="file" accept=".xlsx,.xls,.csv" />
         </label>
+        <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
         <button class="primary sync" data-action="sync">${t("syncNow")}</button>
       </section>
       <section class="panel">
