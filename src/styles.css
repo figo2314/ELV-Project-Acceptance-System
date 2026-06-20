@@ -53,7 +53,7 @@ button {
 
 .shell {
   min-height: 100vh;
-  padding: clamp(12px, 1.6vw, 24px);
+  padding: clamp(10px, 1.2vw, 18px);
 }
 
 .topbar {
@@ -66,8 +66,9 @@ button {
   gap: 16px;
   grid-template-columns: minmax(250px, auto) minmax(0, 1fr) auto;
   margin: 0 auto 20px;
-  max-width: min(1760px, calc(100vw - 48px));
+  max-width: none;
   padding: 14px 16px;
+  width: 100%;
 }
 
 .topbar h1,
@@ -188,7 +189,8 @@ button {
   display: grid;
   gap: 16px;
   margin: 0 auto;
-  max-width: min(1760px, calc(100vw - 48px));
+  max-width: none;
+  width: 100%;
 }
 
 .mobile-grid {
@@ -208,7 +210,8 @@ button {
   display: grid;
   gap: 16px;
   margin: 0 auto;
-  max-width: min(1760px, calc(100vw - 48px));
+  max-width: none;
+  width: 100%;
 }
 
 .admin-nav-item {
@@ -237,7 +240,7 @@ button {
   display: grid;
   gap: 16px;
   margin: 0 auto;
-  max-width: min(1760px, calc(100vw - 48px));
+  max-width: none;
   min-width: 0;
   width: 100%;
 }
@@ -1393,7 +1396,7 @@ button.kpi-card.active {
 
 .data-workbench {
   display: grid;
-  gap: 16px;
+  gap: 14px;
   grid-template-columns: minmax(240px, min(var(--tree-width, 300px), 520px)) minmax(0, 1fr);
   min-height: calc(100vh - 132px);
   min-width: 0;
@@ -1579,6 +1582,7 @@ button.kpi-card.active {
 .data-panel {
   min-width: 0;
   overflow: hidden;
+  padding: 16px;
 }
 
 .data-context-bar {
