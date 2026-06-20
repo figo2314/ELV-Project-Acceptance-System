@@ -1306,13 +1306,13 @@ function getAdminTableColumns() {
   const compactLocation = Boolean(state.adminTreeSelection || state.adminProjectId);
   return [
     { key: "project", label: t("project"), auto: hideProject ? "0" : "140px", min: hideProject ? 0 : 120, resizable: !hideProject },
-    { key: "equipment", label: `${t("equipmentName")} & Context`, auto: compactLocation ? "minmax(340px, 1.45fr)" : "minmax(300px, 1.35fr)", min: 240, resizable: true },
-    { key: "point", label: "Point Name", auto: compactLocation ? "minmax(420px, 1.85fr)" : "minmax(360px, 1.65fr)", min: 260, resizable: true },
-    { key: "pointType", label: "Point Type", auto: "112px", min: 96, resizable: true },
-    { key: "reference", label: t("reference"), auto: compactLocation ? "minmax(220px, 0.9fr)" : "minmax(210px, 0.85fr)", min: 160, resizable: true },
+    { key: "equipment", label: `${t("equipmentName")} & Context`, auto: compactLocation ? "300px" : "280px", min: 220, resizable: true },
+    { key: "point", label: "Point Name", auto: compactLocation ? "340px" : "310px", min: 240, resizable: true },
+    { key: "pointType", label: "Point Type", auto: "104px", min: 88, resizable: true },
+    { key: "reference", label: t("reference"), auto: compactLocation ? "180px" : "170px", min: 140, resizable: true },
     { key: "assignee", label: t("assignee"), auto: "96px", min: 84, resizable: true },
-    { key: "status", label: t("status"), auto: "104px", min: 96, resizable: true },
-    { key: "save", label: "", auto: "72px", min: 68, resizable: false }
+    { key: "status", label: t("status"), auto: "98px", min: 88, resizable: true },
+    { key: "save", label: "", auto: "68px", min: 64, resizable: false }
   ];
 }
 

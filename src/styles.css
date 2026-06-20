@@ -1848,17 +1848,17 @@ button.kpi-card.active {
 }
 
 .excel-table {
-  min-width: 900px;
+  min-width: max-content;
 }
 
 .excel-row {
   display: grid;
   gap: 0;
-  grid-template-columns: var(--admin-grid, 140px minmax(300px, 1.35fr) minmax(360px, 1.65fr) 112px minmax(210px, 0.85fr) 96px 104px 72px);
+  grid-template-columns: var(--admin-grid, 140px 280px 310px 104px 170px 96px 98px 68px);
 }
 
 .excel-table.hide-project {
-  min-width: 760px;
+  min-width: max-content;
 }
 
 .excel-table.hide-project .excel-row > :first-child {
