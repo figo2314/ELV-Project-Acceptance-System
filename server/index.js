@@ -126,6 +126,98 @@ app.post("/api/equipment", async (request, response) => {
   response.status(201).json(equipment);
 });
 
+app.post("/api/admin/equipment", async (request, response) => {
+  const db = await readDb();
+  const body = request.body || {};
+  const equipment = {
+    id: body.id || createId("e"),
+    projectId: body.projectId || db.projects[0]?.id,
+    locationId: body.locationId || db.locations[0]?.id,
+    team: body.team || "BMS",
+    name: body.name || "New Equipment",
+    type: body.type || "Equipment",
+    status: body.status || "pending"
+  };
+  const index = db.equipment.findIndex((item) => item.id === equipment.id);
+  if (index === -1) {
+    db.equipment.push(equipment);
+  } else {
+    db.equipment[index] = { ...db.equipment[index], ...equipment };
+  }
+
+  for (const record of db.records.filter((item) => item.equipmentId === equipment.id)) {
+    record.projectId = equipment.projectId;
+    record.locationId = equipment.locationId;
+    record.team = equipment.team;
+    record.serverUpdatedAt = Date.now();
+  }
+
+  refreshDerivedStatuses(db);
+  await writeDb(db);
+  response.json(db);
+});
+
+app.post("/api/admin/point", async (request, response) => {
+  const db = await readDb();
+  const body = request.body || {};
+  const equipment = db.equipment.find((item) => item.id === body.equipmentId);
+  if (!equipment) {
+    response.status(404).json({ error: "Equipment not found." });
+    return;
+  }
+
+  const point = {
+    id: body.id || createId("pt"),
+    equipmentId: equipment.id,
+    name: body.name || "New Point",
+    type: body.type || "Point",
+    reference: body.reference || "",
+    status: body.status || "pending"
+  };
+  const pointIndex = db.points.findIndex((item) => item.id === point.id);
+  if (pointIndex === -1) {
+    db.points.push(point);
+  } else {
+    db.points[pointIndex] = { ...db.points[pointIndex], ...point };
+  }
+
+  const recordTitle = `${equipment.name} - ${point.name}`;
+  const recordIndex = db.records.findIndex((item) => item.pointId === point.id);
+  if (recordIndex === -1) {
+    db.records.push({
+      id: createId("r"),
+      projectId: equipment.projectId,
+      locationId: equipment.locationId,
+      team: equipment.team,
+      equipmentId: equipment.id,
+      pointId: point.id,
+      title: recordTitle,
+      status: point.status,
+      result: point.status === "passed" ? "Pass" : point.status === "failed" ? "Fail" : "Pending",
+      comments: "",
+      photos: [],
+      assignee: body.assignee || "",
+      due: body.due || "",
+      sync: "synced",
+      updatedAt: new Date().toLocaleString("sv-SE"),
+      serverUpdatedAt: Date.now()
+    });
+  } else {
+    db.records[recordIndex] = {
+      ...db.records[recordIndex],
+      title: recordTitle,
+      status: point.status,
+      assignee: body.assignee ?? db.records[recordIndex].assignee,
+      due: body.due ?? db.records[recordIndex].due,
+      serverUpdatedAt: Date.now()
+    };
+  }
+
+  refreshDerivedStatuses(db);
+  await writeDb(db);
+  response.json(db);
+});
+
 app.post("/api/import/equipment", async (request, response) => {
   const { fileName = "equipment.xlsx", base64 } = request.body;
   if (!base64) {

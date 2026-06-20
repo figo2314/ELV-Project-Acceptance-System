@@ -56,6 +56,9 @@ const dictionary = {
     database: "JSON database",
     manualAdd: "Manual Add",
     addEquipment: "Add Equipment",
+    addPoint: "Add Point",
+    saveChanges: "Save",
+    updateSuccess: "Data updated",
     type: "Type",
     reference: "Reference"
   },
@@ -113,6 +116,9 @@ const dictionary = {
     database: "JSON 資料庫",
     manualAdd: "手動新增",
     addEquipment: "新增設備",
+    addPoint: "新增點位",
+    saveChanges: "保存",
+    updateSuccess: "資料已更新",
     type: "類型",
     reference: "參考標準"
   }
@@ -419,6 +425,7 @@ function renderAdmin() {
       </section>
       <section class="panel">
         <div class="section-title">${t("database")}</div>
+        ${renderNewEquipmentForm()}
         <div class="equipment-table">
           ${state.data.equipment.map(renderEquipmentRow).join("")}
         </div>
@@ -443,20 +450,57 @@ function renderAdmin() {
   `;
 }
 
+function renderNewEquipmentForm() {
+  return `
+    <form class="editor-row new-equipment" data-editor="equipment">
+      <select name="projectId">${state.data.projects.map((project) => option(project.id, project.name, state.selectedProjectId)).join("")}</select>
+      <select name="locationId">${state.data.locations.map((location) => option(location.id, location.name, state.selectedLocationId)).join("")}</select>
+      <input name="team" placeholder="${t("team")}" value="BMS" />
+      <input name="name" placeholder="${t("equipment")}" required />
+      <input name="type" placeholder="${t("type")}" value="Equipment" />
+      <button class="primary" type="submit">${t("addEquipment")}</button>
+    </form>
+  `;
+}
+
 function renderEquipmentRow(item) {
   const project = state.data.projects.find((candidate) => candidate.id === item.projectId);
   const location = state.data.locations.find((candidate) => candidate.id === item.locationId);
   const points = state.data.points.filter((point) => point.equipmentId === item.id);
   return `
-    <div class="equipment-row">
-      <div>
-        <strong>${escapeHtml(item.name)}</strong>
-        <span>${escapeHtml(project?.name || "")} / ${escapeHtml(location?.name || "")}</span>
+    <div class="equipment-editor">
+      <form class="editor-row" data-editor="equipment" data-id="${item.id}">
+        <select name="projectId">${state.data.projects.map((candidate) => option(candidate.id, candidate.name, item.projectId)).join("")}</select>
+        <select name="locationId">${state.data.locations.map((candidate) => option(candidate.id, candidate.name, item.locationId)).join("")}</select>
+        <input name="team" value="${escapeHtml(item.team)}" />
+        <input name="name" value="${escapeHtml(item.name)}" />
+        <input name="type" value="${escapeHtml(item.type)}" />
+        <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), item.status)).join("")}</select>
+        <button class="ghost" type="submit">${t("saveChanges")}</button>
+      </form>
+      <div class="point-editor-list">
+        ${points.map((point) => renderPointEditor(point)).join("")}
+        <form class="editor-row point-editor" data-editor="point" data-equipment-id="${item.id}">
+          <input name="name" placeholder="${t("point")}" required />
+          <input name="type" placeholder="${t("type")}" value="Point" />
+          <input name="reference" placeholder="${t("reference")}" />
+          <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), "pending")).join("")}</select>
+          <button class="ghost" type="submit">${t("addPoint")}</button>
+        </form>
       </div>
-      <span>${escapeHtml(item.team)}</span>
-      <span>${points.length} ${t("pointCount")}</span>
-      <span class="badge ${item.status}">${statusLabel(item.status)}</span>
     </div>
+  `;
+}
+
+function renderPointEditor(point) {
+  return `
+    <form class="editor-row point-editor" data-editor="point" data-id="${point.id}" data-equipment-id="${point.equipmentId}">
+      <input name="name" value="${escapeHtml(point.name)}" />
+      <input name="type" value="${escapeHtml(point.type)}" />
+      <input name="reference" value="${escapeHtml(point.reference || "")}" />
+      <select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), point.status)).join("")}</select>
+      <button class="ghost" type="submit">${t("saveChanges")}</button>
+    </form>
   `;
 }
 
@@ -493,6 +537,9 @@ function bindEvents() {
   document.querySelector("[data-action='translate']")?.addEventListener("click", translateComment);
   document.querySelector("[data-action='import-excel']")?.addEventListener("change", importExcel);
   document.querySelector(".inspection-form")?.addEventListener("submit", saveInspection);
+  document.querySelectorAll("[data-editor]").forEach((form) => {
+    form.addEventListener("submit", saveAdminEditor);
+  });
 }
 
 function handleSelectorChange(field, value) {
@@ -560,6 +607,22 @@ async function importExcel(event) {
     const response = await apiPost("/import/equipment", { fileName: file.name, base64 });
     setData(response.data);
     flash(`${t("importSuccess")}: ${response.importedCount}`);
+  } catch {
+    flash(t("serverOffline"));
+  }
+}
+
+async function saveAdminEditor(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  if (form.dataset.id) payload.id = form.dataset.id;
+  if (form.dataset.equipmentId) payload.equipmentId = form.dataset.equipmentId;
+  const endpoint = form.dataset.editor === "point" ? "/admin/point" : "/admin/equipment";
+  try {
+    const response = await apiPost(endpoint, payload);
+    setData(response);
+    flash(t("updateSuccess"));
   } catch {
     flash(t("serverOffline"));
   }

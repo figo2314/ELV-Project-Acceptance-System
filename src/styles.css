@@ -313,11 +313,44 @@ textarea {
   display: grid;
 }
 
-.equipment-row {
+.equipment-editor {
+  border: 1px solid #dfe7e5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.editor-row {
   align-items: center;
   display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(220px, 1fr) 100px 90px 100px;
+  gap: 8px;
+  grid-template-columns: 1.15fr 1.25fr 0.65fr 1fr 0.8fr 0.75fr auto;
+}
+
+.editor-row input,
+.editor-row select {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.new-equipment {
+  background: #f2f6f4;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+}
+
+.point-editor-list {
+  border-left: 4px solid #e7eeee;
+  display: grid;
+  gap: 8px;
+  margin-left: 8px;
+  padding-left: 12px;
+}
+
+.point-editor {
+  grid-template-columns: minmax(180px, 1fr) 150px minmax(160px, 1fr) 130px auto;
 }
 
 .point-card {
@@ -471,7 +504,9 @@ textarea {
     flex-direction: column;
   }
 
-  .equipment-row {
+  .equipment-row,
+  .editor-row,
+  .point-editor {
     align-items: flex-start;
     grid-template-columns: 1fr;
   }
