@@ -10,6 +10,7 @@ Offline-first web prototype for ELV/BMS project acceptance, inspection records, 
 - PM-style admin command center with per-project equipment, point, inspection, issue, completion, and manager tracking
 - High-visibility dashboard with portfolio completion, equipment/point totals, issue load, unassigned items, overdue items, project performance, and attention list
 - Admin layout with left navigation and dedicated pages for Dashboard, Data Table, Import & Sync, Issues, and People
+- Admin Data Table includes a Project > Building > Floor > Room > Equipment tree view that filters the table
 - English-first UI with Traditional Chinese toggle
 - Equipment, point, and sub-device hierarchy for BMS/ELV inspections
 - Admin equipment manager with Excel import, template download, direct web edit/update, and Excel-like row editing
@@ -37,6 +38,7 @@ Use the Admin tab for small projects or quick edits:
 
 - Add equipment directly from the web form
 - Filter by project and equipment
+- Use the tree view to navigate Project > Building > Floor > Room > Equipment
 - Edit one point/sub-device per row in an Excel-like table
 - Update project manager ownership
 - Edit project, location, team, equipment, point, reference, assignee, due date, and status

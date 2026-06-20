@@ -882,6 +882,57 @@ textarea {
   margin-bottom: 12px;
 }
 
+.data-workbench {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.tree-panel {
+  align-content: start;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  position: sticky;
+  top: 16px;
+}
+
+.tree-view {
+  display: grid;
+  gap: 4px;
+}
+
+.tree-node {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #263941;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 8px 0 calc(8px + var(--level) * 16px);
+  text-align: left;
+}
+
+.tree-node:hover {
+  background: #f2f6f4;
+}
+
+.tree-node.active {
+  background: #174f6f;
+  color: #fff;
+}
+
+.tree-node small {
+  color: #66777d;
+  font-size: 11px;
+}
+
+.tree-node.active small {
+  color: #d9f99d;
+}
+
 .excel-table-wrap {
   border: 1px solid #dfe7e5;
   border-radius: 8px;
@@ -1003,8 +1054,14 @@ textarea {
   .dashboard-hero,
   .dashboard-grid,
   .admin-filter-row,
+  .data-workbench,
   .manager-row {
     grid-template-columns: 1fr;
+  }
+
+  .tree-panel {
+    max-height: none;
+    position: static;
   }
 
   .hero-kpis {

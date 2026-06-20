@@ -112,7 +112,12 @@ const dictionary = {
     previewRows: "Preview rows",
     duplicatePoint: "Duplicate point",
     unknownType: "Unknown equipment type",
-    missingColumn: "Missing required column"
+    missingColumn: "Missing required column",
+    treeView: "Location Tree",
+    allNodes: "All",
+    building: "Building",
+    floor: "Floor",
+    room: "Room"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -232,6 +237,7 @@ function defaultState() {
     adminEquipmentId: "",
     adminSearch: "",
     adminPage: "dashboard",
+    adminTreeSelection: null,
     importPreview: null,
     serverOnline: false,
     data: structuredClone(fallbackData)
@@ -591,10 +597,16 @@ function renderAdminNavItem(page, label) {
 function renderAdminPage() {
   if (state.adminPage === "data") {
     return `
-      <section class="panel">
-        <div class="section-title">${t("dataTable")}</div>
-        ${renderAdminFilters()}
-        ${renderDataTable()}
+      <section class="data-workbench">
+        <aside class="panel tree-panel">
+          <div class="section-title">${t("treeView")}</div>
+          ${renderLocationTree()}
+        </aside>
+        <section class="panel data-panel">
+          <div class="section-title">${t("dataTable")}</div>
+          ${renderAdminFilters()}
+          ${renderDataTable()}
+        </section>
       </section>
     `;
   }
@@ -775,6 +787,34 @@ function renderAdminFilters() {
   `;
 }
 
+function renderLocationTree() {
+  const projectId = state.adminProjectId || state.selectedProjectId;
+  const project = state.data.projects.find((item) => item.id === projectId);
+  const tree = buildLocationTree(projectId);
+  return `
+    <div class="tree-view">
+      ${renderTreeNode({ type: "project", projectId, label: project?.name || t("allNodes") }, 0)}
+      ${[...tree.values()].map((building) => renderTreeBranch(building, 1)).join("")}
+    </div>
+  `;
+}
+
+function renderTreeBranch(node, level) {
+  const children = node.children ? [...node.children.values()].map((child) => renderTreeBranch(child, level + 1)).join("") : "";
+  const equipment = node.equipment ? node.equipment.map((item) => renderTreeNode({ type: "equipment", projectId: item.projectId, locationId: item.locationId, equipmentId: item.id, label: item.name }, level + 1)).join("") : "";
+  return `${renderTreeNode(node, level)}${children}${equipment}`;
+}
+
+function renderTreeNode(node, level) {
+  const selected = isTreeSelected(node);
+  return `
+    <button class="tree-node ${selected ? "active" : ""}" style="--level:${level}" data-tree-node="${encodeTreeNode(node)}">
+      <span>${escapeHtml(node.label)}</span>
+      <small>${escapeHtml(node.type)}</small>
+    </button>
+  `;
+}
+
 function renderDataTable() {
   return `
     <div class="excel-table-wrap">
@@ -839,6 +879,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-admin-page]").forEach((button) => {
     button.addEventListener("click", () => setState({ adminPage: button.dataset.adminPage }));
+  });
+  document.querySelectorAll("[data-tree-node]").forEach((button) => {
+    button.addEventListener("click", () => setState({ adminTreeSelection: JSON.parse(decodeURIComponent(button.dataset.treeNode)) }));
   });
   document.querySelector("[data-action='toggle-lang']")?.addEventListener("click", () => setState({ lang: state.lang === "en" ? "zh" : "en" }));
   document.querySelectorAll("[data-field]").forEach((select) => {
@@ -927,6 +970,7 @@ function updateAdminFilter(field) {
   if (field.dataset.adminFilter === "project") {
     patch.adminProjectId = field.value;
     patch.adminEquipmentId = "";
+    patch.adminTreeSelection = null;
     patch.adminSearchDraft = state.adminSearch || "";
   }
   if (field.dataset.adminFilter === "equipment") patch.adminEquipmentId = field.value;
@@ -1140,6 +1184,45 @@ function getAdminFilteredEquipmentOptions() {
   return state.data.equipment.filter((item) => item.projectId === projectId);
 }
 
+function buildLocationTree(projectId) {
+  const buildings = new Map();
+  const equipment = state.data.equipment.filter((item) => item.projectId === projectId);
+  for (const item of equipment) {
+    const location = state.data.locations.find((candidate) => candidate.id === item.locationId);
+    const parts = parseLocationParts(location?.name || "Unassigned / Unassigned / Unassigned");
+    const building = getTreeChild(buildings, parts.building, { type: "building", projectId, building: parts.building, label: parts.building, children: new Map() });
+    const floor = getTreeChild(building.children, parts.floor, { type: "floor", projectId, building: parts.building, floor: parts.floor, label: parts.floor, children: new Map() });
+    const room = getTreeChild(floor.children, parts.room, { type: "room", projectId, building: parts.building, floor: parts.floor, room: parts.room, locationId: item.locationId, label: parts.room, equipment: [] });
+    room.equipment.push(item);
+  }
+  return buildings;
+}
+
+function getTreeChild(map, key, value) {
+  if (!map.has(key)) map.set(key, value);
+  return map.get(key);
+}
+
+function parseLocationParts(name) {
+  const parts = String(name).split("/").map((part) => part.trim()).filter(Boolean);
+  return {
+    building: parts[0] || "Unassigned Building",
+    floor: parts[1] || "Unassigned Floor",
+    room: parts.slice(2).join(" / ") || "Unassigned Room"
+  };
+}
+
+function encodeTreeNode(node) {
+  const { children, equipment, ...payload } = node;
+  return encodeURIComponent(JSON.stringify(payload));
+}
+
+function isTreeSelected(node) {
+  const selected = state.adminTreeSelection;
+  if (!selected) return node.type === "project";
+  return encodeTreeNode(selected) === encodeTreeNode(node);
+}
+
 function getAdminRows() {
   const projectId = state.adminProjectId || state.selectedProjectId;
   const search = String(state.adminSearch || "").trim().toLowerCase();
@@ -1151,6 +1234,7 @@ function getAdminRows() {
     }))
     .filter((row) => row.equipment && row.point)
     .filter((row) => row.equipment.projectId === projectId)
+    .filter((row) => rowMatchesTree(row))
     .filter((row) => !state.adminEquipmentId || row.equipment.id === state.adminEquipmentId)
     .filter((row) => {
       if (!search) return true;
@@ -1159,6 +1243,18 @@ function getAdminRows() {
         .toLowerCase()
         .includes(search);
     });
+}
+
+function rowMatchesTree(row) {
+  const selected = state.adminTreeSelection;
+  if (!selected || selected.type === "project") return true;
+  const location = state.data.locations.find((item) => item.id === row.equipment.locationId);
+  const parts = parseLocationParts(location?.name || "");
+  if (selected.type === "building") return parts.building === selected.building;
+  if (selected.type === "floor") return parts.building === selected.building && parts.floor === selected.floor;
+  if (selected.type === "room") return row.equipment.locationId === selected.locationId;
+  if (selected.type === "equipment") return row.equipment.id === selected.equipmentId;
+  return true;
 }
 
 function getCommentSuggestions() {
