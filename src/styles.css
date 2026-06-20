@@ -388,6 +388,20 @@ textarea {
   padding: 10px 0;
 }
 
+.issue-row-button {
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.issue-row-button:hover {
+  background: #f7faf9;
+}
+
 .row div,
 .equipment-row div,
 .people div {
@@ -807,7 +821,10 @@ textarea {
   background: rgb(255 255 255 / 10%);
   border: 1px solid rgb(255 255 255 / 14%);
   border-radius: 8px;
+  color: inherit;
   padding: 14px;
+  text-align: left;
+  width: 100%;
 }
 
 .kpi-card strong {
@@ -830,6 +847,22 @@ textarea {
   background: rgb(255 115 105 / 18%);
 }
 
+button.kpi-card {
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+button.kpi-card:hover,
+button.kpi-card.active {
+  background: rgb(255 255 255 / 18%);
+  border-color: rgb(217 249 157 / 72%);
+  transform: translateY(-1px);
+}
+
+button.kpi-card.active {
+  box-shadow: inset 0 -3px 0 #d9f99d;
+}
+
 .dashboard-grid {
   display: grid;
   gap: 16px;
@@ -843,6 +876,21 @@ textarea {
   gap: 12px;
 }
 
+.attention-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.attention-head .section-title {
+  margin-bottom: 2px;
+}
+
+.attention-head p {
+  margin: 0;
+}
+
 .project-card {
   border: 1px solid #dfe7e5;
   border-radius: 8px;
@@ -851,15 +899,225 @@ textarea {
   padding: 14px;
 }
 
-.manager-row {
-  align-items: end;
-  display: grid;
+.project-card-head {
+  align-items: start;
+  display: flex;
   gap: 12px;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px) auto;
+  justify-content: space-between;
 }
 
-.manager-row h2 {
+.project-title-block {
+  display: grid;
+  gap: 2px;
+}
+
+.project-title-block h2 {
   margin: 0;
+}
+
+.project-title-block span {
+  color: #66777d;
+  font-size: 13px;
+}
+
+.project-title-block strong {
+  color: #263941;
+}
+
+.manager-popover {
+  position: relative;
+}
+
+.manager-edit-button {
+  align-items: center;
+  background: #e8f0ed;
+  border: 0;
+  border-radius: 8px;
+  color: #23404c;
+  display: inline-flex;
+  font-size: 18px;
+  height: 36px;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.18s ease, background 0.18s ease;
+  width: 36px;
+}
+
+.project-card:hover .manager-edit-button,
+.manager-popover:focus-within .manager-edit-button {
+  opacity: 1;
+}
+
+.manager-edit-button:hover {
+  background: #d9e7e2;
+}
+
+.manager-edit-panel {
+  background: #fff;
+  border: 1px solid #dfe7e5;
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgb(31 51 58 / 16%);
+  display: none;
+  gap: 8px;
+  min-width: 260px;
+  padding: 12px;
+  position: absolute;
+  right: 0;
+  top: 42px;
+  z-index: 5;
+}
+
+.manager-popover:hover .manager-edit-panel,
+.manager-popover:focus-within .manager-edit-panel {
+  display: grid;
+}
+
+.issue-card {
+  background: #fbfcfc;
+  border: 1px solid #dfe7e5;
+  border-left: 5px solid #b7c8c4;
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  text-align: left;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  width: 100%;
+}
+
+.issue-card:hover {
+  border-color: #174f6f;
+  box-shadow: 0 12px 24px rgb(31 51 58 / 10%);
+  transform: translateY(-1px);
+}
+
+.issue-card.failed {
+  border-left-color: #d04437;
+}
+
+.issue-card.rectification {
+  border-left-color: #5860c7;
+}
+
+.issue-card.pending {
+  border-left-color: #d8a000;
+}
+
+.issue-card-head,
+.modal-summary,
+.modal-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.issue-card h3 {
+  font-size: 16px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.issue-card p {
+  color: #66777d;
+  margin: 4px 0 0;
+}
+
+.issue-card-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.issue-card-meta span {
+  color: #66777d;
+  font-size: 13px;
+}
+
+.issue-card-meta strong {
+  color: #263941;
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgb(15 28 36 / 42%);
+  display: grid;
+  inset: 0;
+  padding: 20px;
+  place-items: center;
+  position: fixed;
+  z-index: 20;
+}
+
+.modal {
+  background: #fff;
+  border: 1px solid #dfe7e5;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgb(15 28 36 / 25%);
+  display: grid;
+  gap: 16px;
+  max-height: calc(100vh - 40px);
+  max-width: 760px;
+  overflow: auto;
+  padding: 20px;
+  width: min(760px, 100%);
+}
+
+.modal-head {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.modal-head h2 {
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.modal-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.modal-detail,
+.modal-block {
+  background: #f7faf9;
+  border: 1px solid #e7eeee;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.modal-detail span {
+  color: #66777d;
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.modal-detail strong {
+  color: #263941;
+}
+
+.modal-block p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.modal-photos {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+.modal-photos img {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  object-fit: cover;
+  width: 100%;
 }
 
 .project-progress-line {
@@ -870,8 +1128,39 @@ textarea {
 }
 
 .project-progress-line > span {
-  color: #174f6f;
   font-weight: 800;
+}
+
+.project-progress-line.active > span {
+  color: #174f6f;
+}
+
+.project-progress-line.empty > span {
+  color: #8a5c5c;
+}
+
+.project-progress-line.risk > span {
+  color: #a85f00;
+}
+
+.project-progress-line.complete > span {
+  color: #126438;
+}
+
+.project-progress-line.active .mini-progress span {
+  background: #174f6f;
+}
+
+.project-progress-line.empty .mini-progress span {
+  background: #d7a6a0;
+}
+
+.project-progress-line.risk .mini-progress span {
+  background: #e49a2f;
+}
+
+.project-progress-line.complete .mini-progress span {
+  background: #22a35a;
 }
 
 .admin-filter-row {
@@ -1054,9 +1343,22 @@ textarea {
   .dashboard-hero,
   .dashboard-grid,
   .admin-filter-row,
-  .data-workbench,
-  .manager-row {
+  .data-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .project-card-head {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .manager-edit-button {
+    opacity: 1;
+  }
+
+  .manager-edit-panel {
+    position: static;
+    width: 100%;
   }
 
   .tree-panel {

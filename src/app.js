@@ -100,6 +100,18 @@ const dictionary = {
     projectRank: "Project Performance",
     attentionNow: "Needs Attention",
     noIssues: "No open issues",
+    allAttention: "All Attention",
+    filteredBy: "Filtered by",
+    matchingRecords: "matching records",
+    noMatchingRecords: "No records match this drilldown",
+    issueDetails: "Issue Details",
+    ageing: "Stalled",
+    days: "days",
+    viewIssues: "View in Issues",
+    close: "Close",
+    noPhotos: "No photos attached",
+    issueOwner: "Owner",
+    issueContext: "Context",
     editPoint: "Edit Point",
     fieldAddPoint: "Add Site Point",
     pointSaved: "Point saved",
@@ -120,22 +132,22 @@ const dictionary = {
     room: "Room"
   },
   zh: {
-    appName: "ELV 項目驗收系統",
+    appName: "ELV 項目驗收",
     field: "現場端",
     admin: "管理端",
     project: "項目",
-    location: "地點",
+    location: "位置",
     team: "團隊/分類",
     equipment: "設備",
     point: "點位/子設備",
-    inspections: "驗收項",
+    inspections: "驗收項目",
     overview: "總覽",
     people: "人員",
     pending: "待驗收",
     passed: "已通過",
-    failed: "不合格",
-    rectification: "待整改",
-    closed: "已閉環",
+    failed: "失敗",
+    rectification: "整改中",
+    closed: "已關閉",
     total: "總數",
     completion: "完成率",
     comments: "備註",
@@ -146,7 +158,7 @@ const dictionary = {
     success: "已離線保存並加入同步隊列",
     online: "在線",
     offline: "離線",
-    syncPending: "等待同步",
+    syncPending: "待同步",
     synced: "已同步",
     search: "搜尋項目、位置、設備、點位",
     rename: "現場名稱",
@@ -157,13 +169,13 @@ const dictionary = {
     translate: "翻譯",
     allProjects: "所有項目統計",
     personStats: "人員統計",
-    openItems: "未閉環問題",
-    noRecord: "選擇一個驗收項開始",
+    openItems: "未關閉問題",
+    noRecord: "選擇一個驗收項目開始",
     editHint: "可修改現場名稱、補充備註、拍照或上傳附件，然後保存。",
     syncNow: "立即同步",
     lastUpdated: "最後更新",
     importExcel: "導入 Excel",
-    downloadTemplate: "下載 Excel 範本",
+    downloadTemplate: "下載 Excel 模板",
     templateHint: "Excel 欄位：Project, Location, Team, Equipment, Type, Point, Point Type, Reference, Assignee, Due",
     equipmentManager: "設備管理",
     pointCount: "點位",
@@ -177,7 +189,75 @@ const dictionary = {
     saveChanges: "保存",
     updateSuccess: "資料已更新",
     type: "類型",
-    reference: "參考標準"
+    reference: "參考值",
+    equipmentCards: "設備卡片",
+    items: "項目",
+    quickActions: "快捷操作",
+    addComment: "備註",
+    commentPlaceholder: "輸入備註，系統會自動聯想歷史備註。",
+    selectedEquipment: "已選設備",
+    noEquipment: "此項目/位置/團隊下沒有設備",
+    logoText: "ELV",
+    adminDashboard: "項目指揮中心",
+    projectManager: "項目經理",
+    equipmentQty: "設備數量",
+    inspectedQty: "已驗收",
+    issueQty: "問題數",
+    dataTable: "驗收資料表",
+    allEquipment: "所有設備",
+    updateManager: "更新負責人",
+    rowSaved: "行資料已保存",
+    equipmentName: "設備名稱",
+    pointName: "點位名稱",
+    equipmentType: "設備類型",
+    pointType: "點位類型",
+    status: "狀態",
+    navDashboard: "儀表板",
+    navData: "資料表",
+    navImport: "導入與同步",
+    navIssues: "問題",
+    navPeople: "人員",
+    portfolioHealth: "項目健康度",
+    totalProjects: "項目",
+    totalEquipment: "設備",
+    totalPoints: "點位",
+    passRate: "通過率",
+    riskLoad: "風險負載",
+    unassigned: "未分配",
+    overdue: "逾期",
+    projectRank: "項目表現",
+    attentionNow: "需要關注",
+    noIssues: "暫無未關閉問題",
+    allAttention: "所有關注項",
+    filteredBy: "當前篩選",
+    matchingRecords: "筆匹配資料",
+    noMatchingRecords: "此下鑽條件暫無資料",
+    issueDetails: "問題詳情",
+    ageing: "已滯留",
+    days: "天",
+    viewIssues: "前往問題頁",
+    close: "關閉",
+    noPhotos: "暫無照片附件",
+    issueOwner: "負責人",
+    issueContext: "上下文",
+    editPoint: "編輯點位",
+    fieldAddPoint: "新增現場點位",
+    pointSaved: "點位已保存",
+    dropExcel: "拖拽 Excel 點位表到此處",
+    validateExcel: "校驗 Excel",
+    importValidated: "導入已校驗文件",
+    validationPassed: "校驗通過",
+    validationErrors: "錯誤",
+    validationWarnings: "警告",
+    previewRows: "預覽行",
+    duplicatePoint: "重複點位",
+    unknownType: "未知設備類型",
+    missingColumn: "缺少必填欄位",
+    treeView: "位置樹",
+    allNodes: "全部",
+    building: "樓棟",
+    floor: "樓層",
+    room: "機房"
   }
 };
 
@@ -238,6 +318,8 @@ function defaultState() {
     adminSearch: "",
     adminPage: "dashboard",
     adminTreeSelection: null,
+    dashboardFilter: "all",
+    selectedIssueId: "",
     importPreview: null,
     serverOnline: false,
     data: structuredClone(fallbackData)
@@ -300,6 +382,7 @@ function render() {
     <main class="shell">
       ${renderTopbar()}
       ${state.view === "field" ? renderField() : renderAdmin()}
+      ${renderIssueModal()}
       <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
     </main>
   `;
@@ -621,7 +704,7 @@ function renderAdminPage() {
         ${state.data.projects.map(renderProjectSummary).join("")}
       </section>
       <section class="panel attention-panel">
-        <div class="section-title">${t("attentionNow")}</div>
+        ${renderAttentionHeader()}
         ${renderAttentionList()}
       </section>
     </section>
@@ -641,16 +724,18 @@ function renderDashboardHero() {
         ${renderKpi(t("totalProjects"), metrics.projects)}
         ${renderKpi(t("totalEquipment"), metrics.equipment)}
         ${renderKpi(t("totalPoints"), metrics.points)}
-        ${renderKpi(t("issueQty"), metrics.issues, "danger")}
-        ${renderKpi(t("unassigned"), metrics.unassigned, metrics.unassigned ? "warn" : "")}
-        ${renderKpi(t("overdue"), metrics.overdue, metrics.overdue ? "danger" : "")}
+        ${renderKpi(t("issueQty"), metrics.issues, "danger", "issues")}
+        ${renderKpi(t("unassigned"), metrics.unassigned, metrics.unassigned ? "warn" : "", "unassigned")}
+        ${renderKpi(t("overdue"), metrics.overdue, metrics.overdue ? "danger" : "", "overdue")}
       </div>
     </section>
   `;
 }
 
-function renderKpi(label, value, tone = "") {
-  return `<div class="kpi-card ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
+function renderKpi(label, value, tone = "", filter = "") {
+  const active = filter && state.dashboardFilter === filter ? "active" : "";
+  if (!filter) return `<div class="kpi-card ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
+  return `<button class="kpi-card ${tone} ${active}" data-dashboard-filter="${filter}"><strong>${value}</strong><span>${label}</span></button>`;
 }
 
 function renderImportPage() {
@@ -707,10 +792,7 @@ function renderIssuesPage() {
     <section class="panel">
       <div class="section-title">${t("openItems")}</div>
       <div class="table">
-        ${state.data.records
-          .filter((record) => ["failed", "rectification", "pending"].includes(record.status))
-          .map(renderIssueRow)
-          .join("")}
+        ${getOpenIssueRecords().map(renderIssueRow).join("")}
       </div>
     </section>
   `;
@@ -733,18 +815,25 @@ function renderProjectSummary(project) {
   const records = state.data.records.filter((record) => record.projectId === project.id);
   const points = state.data.points.filter((point) => equipment.some((item) => item.id === point.equipmentId));
   const stats = getStats(records);
+  const progressTone = getProjectProgressTone(stats);
   return `
     <section class="project-card">
-      <form data-project-manager="${project.id}" class="manager-row">
-        <div>
+      <div class="project-card-head">
+        <div class="project-title-block">
           <p class="eyebrow">${escapeHtml(project.client || "-")}</p>
           <h2>${escapeHtml(project.name)}</h2>
+          <span>${t("projectManager")}: <strong>${escapeHtml(project.manager || "-")}</strong></span>
         </div>
-        <label>${t("projectManager")}
-          <input name="manager" value="${escapeHtml(project.manager || "")}" placeholder="PM / Engineer" />
-        </label>
-        <button class="ghost" type="submit">${t("updateManager")}</button>
-      </form>
+        <form data-project-manager="${project.id}" class="manager-popover">
+          <button class="manager-edit-button" type="button" title="${t("updateManager")}" aria-label="${t("updateManager")}">✎</button>
+          <div class="manager-edit-panel">
+            <label>${t("projectManager")}
+              <input name="manager" value="${escapeHtml(project.manager || "")}" placeholder="PM / Engineer" />
+            </label>
+            <button class="ghost compact" type="submit">${t("saveChanges")}</button>
+          </div>
+        </form>
+      </div>
       <div class="stats wide">
         ${statCard(t("equipmentQty"), equipment.length)}
         ${statCard(t("pointCount"), points.length)}
@@ -752,7 +841,7 @@ function renderProjectSummary(project) {
         ${statCard(t("pending"), stats.pending)}
         ${statCard(t("issueQty"), stats.failed + stats.rectification)}
       </div>
-      <div class="project-progress-line">
+      <div class="project-progress-line ${progressTone}">
         <span>${stats.completion}%</span>
         <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
       </div>
@@ -760,10 +849,57 @@ function renderProjectSummary(project) {
   `;
 }
 
+function getProjectProgressTone(stats) {
+  if (stats.total === 0 || stats.completion === 0) return "empty";
+  if (stats.failed || stats.rectification) return "risk";
+  if (stats.completion === 100) return "complete";
+  return "active";
+}
+
 function renderAttentionList() {
-  const records = state.data.records.filter((record) => ["failed", "rectification", "pending"].includes(record.status)).slice(0, 8);
-  if (!records.length) return `<div class="empty small">${t("noIssues")}</div>`;
-  return records.map(renderIssueRow).join("");
+  const records = getDashboardDrilldownRecords().slice(0, 8);
+  if (!records.length) return `<div class="empty small">${state.dashboardFilter === "all" ? t("noIssues") : t("noMatchingRecords")}</div>`;
+  return records.map(renderAttentionIssueCard).join("");
+}
+
+function renderAttentionHeader() {
+  const filter = getDashboardFilterMeta(state.dashboardFilter);
+  const count = getDashboardDrilldownRecords().length;
+  return `
+    <div class="attention-head">
+      <div>
+        <div class="section-title">${t("attentionNow")}</div>
+        <p class="muted">${t("filteredBy")}: <strong>${filter.label}</strong> / ${count} ${t("matchingRecords")}</p>
+      </div>
+      ${state.dashboardFilter === "all" ? "" : `<button class="ghost compact" data-dashboard-filter="all">${t("allAttention")}</button>`}
+    </div>
+  `;
+}
+
+function getDashboardDrilldownRecords() {
+  const filter = state.dashboardFilter || "all";
+  if (filter === "issues") return getOpenIssueRecords().filter((record) => ["failed", "rectification"].includes(record.status));
+  if (filter === "unassigned") return getOpenIssueRecords().filter((record) => !record.assignee);
+  if (filter === "overdue") return getOpenIssueRecords().filter(isRecordOverdue);
+  return getOpenIssueRecords();
+}
+
+function getDashboardFilterMeta(filter) {
+  const labels = {
+    all: t("allAttention"),
+    issues: t("issueQty"),
+    unassigned: t("unassigned"),
+    overdue: t("overdue")
+  };
+  return { label: labels[filter] || labels.all };
+}
+
+function isRecordOverdue(record) {
+  if (!record.due || ["passed", "closed"].includes(record.status)) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(record.due);
+  return !Number.isNaN(due.getTime()) && due < today;
 }
 
 function renderAdminFilters() {
@@ -862,26 +998,200 @@ function renderIssueRow(record) {
   const equipment = state.data.equipment.find((item) => item.id === record.equipmentId);
   const point = state.data.points.find((item) => item.id === record.pointId);
   return `
-    <div class="row">
+    <button class="row issue-row-button" data-issue-detail="${record.id}">
       <div>
         <strong>${escapeHtml(record.title)}</strong>
         <span>${escapeHtml(equipment?.name || "")} / ${escapeHtml(point?.name || "")}</span>
       </div>
+      <span>${t("ageing")} ${ageInDays(record)} ${t("days")}</span>
       <span>${escapeHtml(record.assignee || "-")}</span>
       <span class="badge ${record.status}">${statusLabel(record.status)}</span>
+    </button>
+  `;
+}
+
+function renderAttentionIssueCard(record) {
+  const equipment = state.data.equipment.find((item) => item.id === record.equipmentId);
+  const point = state.data.points.find((item) => item.id === record.pointId);
+  const location = state.data.locations.find((item) => item.id === record.locationId);
+  return `
+    <button class="issue-card ${record.status}" data-issue-detail="${record.id}">
+      <div class="issue-card-head">
+        <span class="badge ${record.status}">${statusLabel(record.status)}</span>
+        <strong>${t("ageing")} ${ageInDays(record)} ${t("days")}</strong>
+      </div>
+      <div>
+        <h3>${escapeHtml(record.title)}</h3>
+        <p>${escapeHtml(equipment?.name || "")} / ${escapeHtml(point?.name || "")}</p>
+      </div>
+      <div class="issue-card-meta">
+        <span>${t("assignee")}: <strong>${escapeHtml(record.assignee || "-")}</strong></span>
+        <span>${t("due")}: <strong>${escapeHtml(record.due || "-")}</strong></span>
+        <span>${escapeHtml(location?.name || "")}</span>
+      </div>
+    </button>
+  `;
+}
+
+function renderIssueModal() {
+  if (!state.selectedIssueId) return "";
+  const record = state.data.records.find((item) => item.id === state.selectedIssueId);
+  if (!record) return "";
+  const project = state.data.projects.find((item) => item.id === record.projectId);
+  const location = state.data.locations.find((item) => item.id === record.locationId);
+  const equipment = state.data.equipment.find((item) => item.id === record.equipmentId);
+  const point = state.data.points.find((item) => item.id === record.pointId);
+  const photos = record.photos || [];
+  return `
+    <div class="modal-backdrop">
+      <section class="modal" role="dialog" aria-modal="true" aria-label="${t("issueDetails")}" data-modal>
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">${t("issueDetails")}</p>
+            <h2>${escapeHtml(record.title)}</h2>
+          </div>
+          <button class="icon-btn" data-close-modal title="${t("close")}">X</button>
+        </div>
+        <div class="modal-summary">
+          <span class="badge ${record.status}">${statusLabel(record.status)}</span>
+          <strong>${t("ageing")} ${ageInDays(record)} ${t("days")}</strong>
+          <span>${t("due")}: ${escapeHtml(record.due || "-")}</span>
+        </div>
+        <div class="modal-grid">
+          ${modalDetail(t("project"), project?.name)}
+          ${modalDetail(t("location"), location?.name)}
+          ${modalDetail(t("equipment"), equipment?.name)}
+          ${modalDetail(t("point"), point?.name)}
+          ${modalDetail(t("issueOwner"), record.assignee || "-")}
+          ${modalDetail(t("lastUpdated"), record.updatedAt || formatDateTime(record.serverUpdatedAt) || "-")}
+        </div>
+        <div class="modal-block">
+          <div class="section-title">${t("comments")}</div>
+          <p>${escapeHtml(record.comments || "-")}</p>
+        </div>
+        <div class="modal-block">
+          <div class="section-title">${t("attachments")}</div>
+          ${
+            photos.length
+              ? `<div class="modal-photos">${photos.map((photo) => `<img src="${photo.dataUrl || photo}" alt="${escapeHtml(photo.name || "Issue photo")}" />`).join("")}</div>`
+              : `<div class="empty small">${t("noPhotos")}</div>`
+          }
+        </div>
+        <div class="modal-actions">
+          <button class="ghost" data-go-issues>${t("viewIssues")}</button>
+          <button class="primary" data-close-modal>${t("close")}</button>
+        </div>
+      </section>
     </div>
   `;
 }
 
+function modalDetail(label, value) {
+  return `<div class="modal-detail"><span>${label}</span><strong>${escapeHtml(value || "-")}</strong></div>`;
+}
+
+function ageInDays(record) {
+  const timestamp = getIssueTimestamp(record);
+  if (!timestamp) return 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(timestamp);
+  start.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000));
+}
+
+function getIssueTimestamp(record) {
+  if (record.localUpdatedAt) return record.localUpdatedAt;
+  if (record.serverUpdatedAt) return record.serverUpdatedAt;
+  if (record.updatedAt) {
+    const parsed = new Date(record.updatedAt);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  if (record.due) {
+    const parsed = new Date(record.due);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  return 0;
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("sv-SE");
+}
+
+function openIssueDetail(recordId) {
+  setState({ selectedIssueId: recordId });
+}
+
+function closeIssueDetail() {
+  setState({ selectedIssueId: "" });
+}
+
+function goToIssuesPage() {
+  setState({ adminPage: "issues", selectedIssueId: "" });
+}
+
+function handleModalBackdrop(event) {
+  if (event.target === event.currentTarget) closeIssueDetail();
+}
+
+function stopModalClick(event) {
+  event.stopPropagation();
+}
+
+function handleEscapeKey(event) {
+  if (event.key === "Escape" && state.selectedIssueId) closeIssueDetail();
+}
+
+function setAdminPage(page) {
+  setState({ adminPage: page, selectedIssueId: "", dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all" });
+}
+
+function setView(view) {
+  setState({ view, selectedIssueId: "" });
+}
+
+function setDashboardFilter(filter) {
+  setState({ dashboardFilter: filter || "all", selectedIssueId: "" });
+}
+
+function compareIssuePriority(a, b) {
+  const rank = { failed: 0, rectification: 1, pending: 2 };
+  return (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || ageInDays(b) - ageInDays(a);
+}
+
+function getOpenIssueRecords() {
+  return [...state.data.records].filter((record) => ["failed", "rectification", "pending"].includes(record.status)).sort(compareIssuePriority);
+}
+
+function bindIssueDetailEvents() {
+  document.querySelectorAll("[data-issue-detail]").forEach((button) => {
+    button.addEventListener("click", () => openIssueDetail(button.dataset.issueDetail));
+  });
+  document.querySelectorAll("[data-close-modal]").forEach((button) => {
+    button.addEventListener("click", closeIssueDetail);
+  });
+  document.querySelector("[data-go-issues]")?.addEventListener("click", goToIssuesPage);
+  document.querySelector("[data-modal]")?.addEventListener("click", stopModalClick);
+  document.querySelector(".modal-backdrop")?.addEventListener("click", handleModalBackdrop);
+  window.removeEventListener("keydown", handleEscapeKey);
+  window.addEventListener("keydown", handleEscapeKey);
+}
+
 function bindEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => setState({ view: button.dataset.view }));
+    button.addEventListener("click", () => setView(button.dataset.view));
   });
   document.querySelectorAll("[data-admin-page]").forEach((button) => {
-    button.addEventListener("click", () => setState({ adminPage: button.dataset.adminPage }));
+    button.addEventListener("click", () => setAdminPage(button.dataset.adminPage));
   });
   document.querySelectorAll("[data-tree-node]").forEach((button) => {
     button.addEventListener("click", () => setState({ adminTreeSelection: JSON.parse(decodeURIComponent(button.dataset.treeNode)) }));
+  });
+  document.querySelectorAll("[data-dashboard-filter]").forEach((button) => {
+    button.addEventListener("click", () => setDashboardFilter(button.dataset.dashboardFilter));
   });
   document.querySelector("[data-action='toggle-lang']")?.addEventListener("click", () => setState({ lang: state.lang === "en" ? "zh" : "en" }));
   document.querySelectorAll("[data-field]").forEach((select) => {
@@ -945,6 +1255,7 @@ function bindEvents() {
   document.querySelectorAll("[data-editor]").forEach((form) => {
     form.addEventListener("submit", saveAdminEditor);
   });
+  bindIssueDetailEvents();
 }
 
 function handleSelectorChange(field, value) {
@@ -1368,16 +1679,16 @@ async function readExcelRows(file) {
 
 function normalizeImportRow(row) {
   return {
-    Project: pickImportValue(row, ["Project", "項目"]),
-    Location: pickImportValue(row, ["Location", "Area", "地點", "位置"]),
-    Team: pickImportValue(row, ["Team", "Category", "System", "團隊", "分類", "系統"]),
-    Equipment: pickImportValue(row, ["Equipment", "Equipment Name", "Name", "Device", "設備", "設備名稱"]),
-    Type: pickImportValue(row, ["Type", "Equipment Type", "類型"]),
-    Point: pickImportValue(row, ["Point", "Point Name", "Sub Device", "點位", "子設備"]),
-    "Point Type": pickImportValue(row, ["Point Type", "Signal Type", "點位類型"]),
-    Reference: pickImportValue(row, ["Reference", "Expected", "標準", "參考"]),
-    Assignee: pickImportValue(row, ["Assignee", "Owner", "負責人"]),
-    Due: pickImportValue(row, ["Due", "Target Date", "目標日期"])
+    Project: pickImportValue(row, ["Project", "項目", "项目"]),
+    Location: pickImportValue(row, ["Location", "Area", "位置", "地點", "地点"]),
+    Team: pickImportValue(row, ["Team", "Category", "System", "團隊", "团队", "分類", "分类", "系統", "系统"]),
+    Equipment: pickImportValue(row, ["Equipment", "Equipment Name", "Name", "Device", "設備", "设备", "設備名稱", "设备名称"]),
+    Type: pickImportValue(row, ["Type", "Equipment Type", "類型", "类型", "設備類型", "设备类型"]),
+    Point: pickImportValue(row, ["Point", "Point Name", "Sub Device", "點位", "点位", "子設備", "子设备"]),
+    "Point Type": pickImportValue(row, ["Point Type", "Signal Type", "點位類型", "点位类型", "信號類型", "信号类型"]),
+    Reference: pickImportValue(row, ["Reference", "Expected", "參考值", "参考值", "標準", "标准"]),
+    Assignee: pickImportValue(row, ["Assignee", "Owner", "負責人", "负责人"]),
+    Due: pickImportValue(row, ["Due", "Target Date", "目標日期", "目标日期"])
   };
 }
 
