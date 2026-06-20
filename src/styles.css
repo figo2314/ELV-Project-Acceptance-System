@@ -579,8 +579,29 @@ textarea {
   grid-column: 1 / -1;
 }
 
-.comment-panel.show {
+.comment-panel.show,
+.field-point-editor.show {
   display: grid;
+}
+
+.field-point-editor,
+.field-add-point {
+  background: #f7faf9;
+  border: 1px solid #e7eeee;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(160px, 1fr) 140px minmax(160px, 1fr) auto;
+  padding: 10px;
+}
+
+.field-point-editor {
+  display: none;
+}
+
+.field-add-point {
+  border-style: dashed;
 }
 
 .attachment-dock {
@@ -924,7 +945,9 @@ textarea {
   .editor-row,
   .point-editor,
   .point-action-row,
-  .attachment-dock {
+  .attachment-dock,
+  .field-point-editor,
+  .field-add-point {
     align-items: flex-start;
     grid-template-columns: 1fr;
   }

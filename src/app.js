@@ -98,7 +98,10 @@ const dictionary = {
     overdue: "Overdue",
     projectRank: "Project Performance",
     attentionNow: "Needs Attention",
-    noIssues: "No open issues"
+    noIssues: "No open issues",
+    editPoint: "Edit Point",
+    fieldAddPoint: "Add Site Point",
+    pointSaved: "Point saved"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -395,6 +398,7 @@ function renderFieldOperation() {
       <datalist id="comment-suggestions">${getCommentSuggestions().map((comment) => `<option value="${escapeHtml(comment)}"></option>`).join("")}</datalist>
       <div class="point-action-list">
         ${points.map((point) => renderPointActionRow(point)).join("")}
+        ${renderFieldAddPointForm(equipment)}
       </div>
       ${selectedRecord ? renderAttachmentDock(selectedRecord) : ""}
     </div>
@@ -414,11 +418,37 @@ function renderPointActionRow(point) {
       <div class="quick-actions">
         ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}">${result}</button>`).join("")}
         <button class="ghost compact" data-comment-record="${record?.id || ""}">${t("addComment")}</button>
+        <button class="ghost compact" data-edit-point="${point.id}">${t("editPoint")}</button>
       </div>
       <div class="comment-panel ${isSelected ? "show" : ""}">
         <textarea rows="2" list="comment-suggestions" data-comment-input="${record?.id || ""}" placeholder="${t("commentPlaceholder")}">${escapeHtml(record?.comments || "")}</textarea>
       </div>
+      ${renderFieldPointEditor(point, isSelected)}
     </div>
+  `;
+}
+
+function renderFieldPointEditor(point, isSelected) {
+  return `
+    <form class="field-point-editor ${isSelected ? "show" : ""}" data-field-point-editor data-id="${point.id}" data-equipment-id="${point.equipmentId}">
+      <input name="name" value="${escapeHtml(point.name)}" placeholder="${t("pointName")}" />
+      <input name="type" value="${escapeHtml(point.type)}" placeholder="${t("pointType")}" />
+      <input name="reference" value="${escapeHtml(point.reference || "")}" placeholder="${t("reference")}" />
+      <input name="status" type="hidden" value="${escapeHtml(point.status || "pending")}" />
+      <button class="ghost compact" type="submit">${t("saveChanges")}</button>
+    </form>
+  `;
+}
+
+function renderFieldAddPointForm(equipment) {
+  return `
+    <form class="field-add-point" data-field-point-editor data-equipment-id="${equipment.id}">
+      <input name="name" placeholder="${t("pointName")}" required />
+      <input name="type" placeholder="${t("pointType")}" value="Point" />
+      <input name="reference" placeholder="${t("reference")}" />
+      <input name="status" type="hidden" value="pending" />
+      <button class="primary" type="submit">${t("fieldAddPoint")}</button>
+    </form>
   `;
 }
 
@@ -785,6 +815,9 @@ function bindEvents() {
   document.querySelectorAll("[data-comment-record]").forEach((button) => {
     button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.commentRecord }));
   });
+  document.querySelectorAll("[data-edit-point]").forEach((button) => {
+    button.addEventListener("click", () => selectPoint(button.dataset.editPoint));
+  });
   document.querySelectorAll("[data-comment-input]").forEach((input) => {
     input.addEventListener("change", () => updateRecordComment(input.dataset.commentInput, input.value));
   });
@@ -803,6 +836,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-row-editor]").forEach((form) => {
     form.addEventListener("submit", saveDataRow);
+  });
+  document.querySelectorAll("[data-field-point-editor]").forEach((form) => {
+    form.addEventListener("submit", saveFieldPoint);
   });
   document.querySelector(".inspection-form")?.addEventListener("submit", saveInspection);
   document.querySelector(".attachment-dock")?.addEventListener("submit", saveInspection);
@@ -946,6 +982,24 @@ async function saveAdminEditor(event) {
     const response = await apiPost(endpoint, payload);
     setData(response);
     flash(t("updateSuccess"));
+  } catch {
+    flash(t("serverOffline"));
+  }
+}
+
+async function saveFieldPoint(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  if (form.dataset.id) payload.id = form.dataset.id;
+  payload.equipmentId = form.dataset.equipmentId;
+  try {
+    const response = await apiPost("/admin/point", payload);
+    const point = response.points.find((item) => item.equipmentId === payload.equipmentId && item.name === payload.name) || response.points.find((item) => item.id === payload.id);
+    const record = response.records.find((item) => item.pointId === point?.id);
+    setData(response);
+    setState({ selectedEquipmentId: payload.equipmentId, selectedPointId: point?.id || state.selectedPointId, selectedRecordId: record?.id || state.selectedRecordId, toast: t("pointSaved") });
+    window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch {
     flash(t("serverOffline"));
   }
