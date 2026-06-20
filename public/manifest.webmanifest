@@ -1,0 +1,17 @@
+{
+  "name": "ELV Project Acceptance System",
+  "short_name": "ELV Accept",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8f7",
+  "theme_color": "#174f6f",
+  "description": "Offline-first ELV/BMS project acceptance and inspection tracker.",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "elv-project-acceptance-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline-first ELV/BMS project acceptance web app prototype.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite --host 127.0.0.1",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
