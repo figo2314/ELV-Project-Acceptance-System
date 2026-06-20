@@ -82,7 +82,12 @@ const dictionary = {
     pointName: "Point Name",
     equipmentType: "Equipment Type",
     pointType: "Point Type",
-    status: "Status"
+    status: "Status",
+    navDashboard: "Dashboard",
+    navData: "Data Table",
+    navImport: "Import & Sync",
+    navIssues: "Issues",
+    navPeople: "People"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -200,6 +205,7 @@ function defaultState() {
     adminProjectId: "p1",
     adminEquipmentId: "",
     adminSearch: "",
+    adminPage: "dashboard",
     serverOnline: false,
     data: structuredClone(fallbackData)
   };
@@ -508,27 +514,85 @@ function renderInspectionForm(record) {
 
 function renderAdmin() {
   return `
-    <section class="admin-workspace">
-      <section class="panel admin-tools">
-        <div>
-          <div class="section-title">${t("adminDashboard")}</div>
-          <p class="muted">${t("templateHint")}</p>
-        </div>
-        <label class="file-button">${t("importExcel")}
-          <input data-action="import-excel" type="file" accept=".xlsx,.xls,.csv" />
-        </label>
-        <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
-        <button class="primary sync" data-action="sync">${t("syncNow")}</button>
+    <section class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="admin-side-title">${t("admin")}</div>
+        ${renderAdminNavItem("dashboard", t("navDashboard"))}
+        ${renderAdminNavItem("data", t("navData"))}
+        ${renderAdminNavItem("import", t("navImport"))}
+        ${renderAdminNavItem("issues", t("navIssues"))}
+        ${renderAdminNavItem("people", t("navPeople"))}
+      </aside>
+      <section class="admin-main">
+        ${renderAdminPage()}
       </section>
-      <section class="project-dashboard">
-        ${state.data.projects.map(renderProjectSummary).join("")}
-      </section>
+    </section>
+  `;
+}
+
+function renderAdminNavItem(page, label) {
+  return `<button class="admin-nav-item ${state.adminPage === page ? "active" : ""}" data-admin-page="${page}">${label}</button>`;
+}
+
+function renderAdminPage() {
+  if (state.adminPage === "data") {
+    return `
       <section class="panel">
         <div class="section-title">${t("dataTable")}</div>
         ${renderAdminFilters()}
         ${renderDataTable()}
       </section>
-      ${state.conflicts.length ? `<section class="panel"><div class="section-title">${t("syncConflicts")}</div>${state.conflicts.map((item) => `<p class="muted">${escapeHtml(item.local.title)}</p>`).join("")}</section>` : ""}
+    `;
+  }
+  if (state.adminPage === "import") return renderImportPage();
+  if (state.adminPage === "issues") return renderIssuesPage();
+  if (state.adminPage === "people") return renderPeoplePage();
+  return `
+    <section class="project-dashboard">
+      ${state.data.projects.map(renderProjectSummary).join("")}
+    </section>
+  `;
+}
+
+function renderImportPage() {
+  return `
+    <section class="panel admin-tools">
+      <div>
+        <div class="section-title">${t("navImport")}</div>
+        <p class="muted">${t("templateHint")}</p>
+      </div>
+      <label class="file-button">${t("importExcel")}
+        <input data-action="import-excel" type="file" accept=".xlsx,.xls,.csv" />
+      </label>
+      <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
+      <button class="primary sync" data-action="sync">${t("syncNow")}</button>
+      ${state.conflicts.length ? `<div class="section-title">${t("syncConflicts")}</div>${state.conflicts.map((item) => `<p class="muted">${escapeHtml(item.local.title)}</p>`).join("")}` : ""}
+    </section>
+  `;
+}
+
+function renderIssuesPage() {
+  return `
+    <section class="panel">
+      <div class="section-title">${t("openItems")}</div>
+      <div class="table">
+        ${state.data.records
+          .filter((record) => ["failed", "rectification", "pending"].includes(record.status))
+          .map(renderIssueRow)
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderPeoplePage() {
+  const people = getPeopleStats();
+  return `
+    <section class="panel">
+      <div class="section-title">${t("personStats")}</div>
+      <div class="people">
+        ${people.map((person) => `<div><strong>${escapeHtml(person.name || "-")}</strong><span>${person.done}/${person.total}</span><progress value="${person.done}" max="${person.total}"></progress></div>`).join("")}
+      </div>
     </section>
   `;
 }
@@ -643,6 +707,9 @@ function renderIssueRow(record) {
 function bindEvents() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setState({ view: button.dataset.view }));
+  });
+  document.querySelectorAll("[data-admin-page]").forEach((button) => {
+    button.addEventListener("click", () => setState({ adminPage: button.dataset.adminPage }));
   });
   document.querySelector("[data-action='toggle-lang']")?.addEventListener("click", () => setState({ lang: state.lang === "en" ? "zh" : "en" }));
   document.querySelectorAll("[data-field]").forEach((select) => {

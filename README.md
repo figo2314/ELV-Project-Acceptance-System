@@ -7,6 +7,7 @@ Offline-first web prototype for ELV/BMS project acceptance, inspection records, 
 - Mobile-friendly project, location, team/category, equipment, and inspection flow
 - Field workflow with project/location/team filters, equipment cards, point action list, quick Pass/Fail/N/A, and shared comment suggestions
 - PM-style admin command center with per-project equipment, point, inspection, issue, completion, and manager tracking
+- Admin layout with left navigation and dedicated pages for Dashboard, Data Table, Import & Sync, Issues, and People
 - English-first UI with Traditional Chinese toggle
 - Equipment, point, and sub-device hierarchy for BMS/ELV inspections
 - Admin equipment manager with Excel import, template download, direct web edit/update, and Excel-like row editing
