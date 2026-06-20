@@ -1,5 +1,10 @@
 const STORAGE_KEY = "elv-acceptance-offline-v2";
-const API_BASE = "http://127.0.0.1:4177/api";
+const API_BASE =
+  window.__ELV_API_BASE__ ||
+  import.meta.env?.VITE_API_BASE ||
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.port === "5176" || window.location.port === "5173"
+    ? `http://${window.location.hostname}:4177/api`
+    : "/api");
 const KNOWN_EQUIPMENT_TYPES = ["DDC Panel", "Temperature Sensor", "Air Handling Unit", "Lighting Panel", "Power Meter", "Controller", "Sensor", "Actuator", "Valve", "Meter", "Equipment"];
 
 const dictionary = {
@@ -295,8 +300,8 @@ init();
 
 async function init() {
   render();
-  await bootstrapFromServer();
   await syncRecords(false);
+  await bootstrapFromServer();
   render();
 }
 
@@ -338,7 +343,9 @@ function saveState() {
 async function bootstrapFromServer() {
   try {
     const data = await apiGet("/bootstrap");
-    setState({ data, serverOnline: true, toast: "" }, false);
+    const pending = getPendingRecords();
+    const merged = pending.length ? mergeLocalPendingRecords(data, pending, state.conflicts) : data;
+    setState({ data: normalizeSelection(merged), serverOnline: true, toast: "" }, false);
   } catch {
     setState({ serverOnline: false, toast: t("serverOffline") }, false);
     window.setTimeout(() => setState({ toast: "" }), 2500);
@@ -1354,19 +1361,42 @@ function updateRecord(recordId, patch) {
 }
 
 async function syncRecords(showToast) {
-  const pending = state.data.records.filter((record) => record.sync === "pending");
+  const pending = getPendingRecords();
   if (!pending.length) {
     if (showToast) flash(t("synced"));
     return;
   }
   try {
     const response = await apiPost("/sync", { records: pending });
-    setState({ data: normalizeSelection(response), conflicts: response.conflicts || [], serverOnline: true });
-    if (showToast) flash(response.conflicts?.length ? t("syncConflicts") : t("synced"));
+    const { conflicts = [], ...serverData } = response;
+    const data = mergeLocalPendingRecords(serverData, pending, conflicts);
+    setState({ data: normalizeSelection(data), conflicts, serverOnline: true });
+    if (showToast) flash(conflicts.length ? t("syncConflicts") : t("synced"));
   } catch {
     setState({ serverOnline: false });
     if (showToast) flash(t("serverOffline"));
   }
+}
+
+function getPendingRecords() {
+  return state.data.records.filter((record) => record.sync === "pending");
+}
+
+function mergeLocalPendingRecords(serverData, pendingRecords, conflicts = []) {
+  if (!pendingRecords.length) return serverData;
+  const conflictIds = new Set(conflicts.map((item) => item.local?.id).filter(Boolean));
+  const records = [...serverData.records];
+  for (const pending of pendingRecords) {
+    if (!conflictIds.has(pending.id)) continue;
+    const localConflict = { ...pending, sync: "pending", hasConflict: true };
+    const index = records.findIndex((record) => record.id === pending.id);
+    if (index === -1) {
+      records.push(localConflict);
+    } else {
+      records[index] = localConflict;
+    }
+  }
+  return refreshLocalStatuses({ ...serverData, records });
 }
 
 async function validateExcelFile(file) {

@@ -266,8 +266,10 @@ app.post("/api/admin/point", async (request, response) => {
       ...db.records[recordIndex],
       title: recordTitle,
       status: point.status,
+      result: resultFromStatus(point.status),
       assignee: body.assignee ?? db.records[recordIndex].assignee,
       due: body.due ?? db.records[recordIndex].due,
+      updatedAt: new Date().toLocaleString("sv-SE"),
       serverUpdatedAt: Date.now()
     };
   }
@@ -291,13 +293,17 @@ app.post("/api/import/equipment", async (request, response) => {
   const imported = [];
 
   for (const row of rows) {
-    const name = pick(row, ["Equipment", "Equipment Name", "Name", "Device", "設備", "設備名稱"]);
+    const name = pick(row, ["Equipment", "Equipment Name", "Name", "Device", "設備", "设备", "設備名稱", "设备名称"]);
     if (!name) continue;
-    const projectName = pick(row, ["Project", "項目"]) || db.projects[0]?.name || "Default Project";
-    const locationName = pick(row, ["Location", "Area", "地點", "位置"]) || "Unassigned";
-    const team = pick(row, ["Team", "Category", "System", "團隊", "分類", "系統"]) || "BMS";
-    const type = pick(row, ["Type", "Equipment Type", "類型"]) || "Equipment";
-    const pointName = pick(row, ["Point", "Point Name", "Sub Device", "點位", "子設備"]);
+    const projectName = pick(row, ["Project", "項目", "项目"]) || db.projects[0]?.name || "Default Project";
+    const locationName = pick(row, ["Location", "Area", "位置", "地點", "地点"]) || "Unassigned";
+    const team = pick(row, ["Team", "Category", "System", "團隊", "团队", "分類", "分类", "系統", "系统"]) || "BMS";
+    const type = pick(row, ["Type", "Equipment Type", "類型", "类型", "設備類型", "设备类型"]) || "Equipment";
+    const pointName = pick(row, ["Point", "Point Name", "Sub Device", "點位", "点位", "子設備", "子设备"]);
+    const pointType = pick(row, ["Point Type", "Signal Type", "點位類型", "点位类型", "信號類型", "信号类型"]) || "Point";
+    const reference = pick(row, ["Reference", "Expected", "參考值", "参考值", "標準", "标准"]) || "";
+    const assignee = pick(row, ["Assignee", "Owner", "負責人", "负责人"]) || "";
+    const due = pick(row, ["Due", "Target Date", "目標日期", "目标日期"]) || "";
 
     const project = upsertByName(db.projects, { id: createId("p"), name: projectName, client: "" });
     const location = upsertLocation(db.locations, { id: createId("l"), projectId: project.id, name: locationName });
@@ -305,35 +311,49 @@ app.post("/api/import/equipment", async (request, response) => {
     if (!item) {
       item = { id: createId("e"), projectId: project.id, locationId: location.id, team, name, type, status: "pending" };
       db.equipment.push(item);
+    } else {
+      item.projectId = project.id;
+      item.locationId = location.id;
+      item.team = team;
+      item.type = type;
     }
+
     if (pointName) {
-      const point = {
-        id: createId("pt"),
-        equipmentId: item.id,
-        name: pointName,
-        type: pick(row, ["Point Type", "Signal Type", "點位類型"]) || "Point",
-        reference: pick(row, ["Reference", "Expected", "標準", "參考"]) || "",
-        status: "pending"
-      };
-      db.points.push(point);
-      db.records.push({
-        id: createId("r"),
+      let point = db.points.find((candidate) => candidate.equipmentId === item.id && candidate.name.trim().toLowerCase() === pointName.trim().toLowerCase());
+      if (!point) {
+        point = { id: createId("pt"), equipmentId: item.id, name: pointName, type: pointType, reference, status: "pending" };
+        db.points.push(point);
+      } else {
+        point.type = pointType;
+        point.reference = reference;
+      }
+
+      const recordIndex = db.records.findIndex((candidate) => candidate.pointId === point.id);
+      const nextRecord = {
         projectId: project.id,
         locationId: location.id,
         team,
         equipmentId: item.id,
         pointId: point.id,
         title: `${name} - ${pointName}`,
-        status: "pending",
-        result: "Pending",
-        comments: "",
-        photos: [],
-        assignee: pick(row, ["Assignee", "Owner", "負責人"]) || "",
-        due: pick(row, ["Due", "Target Date", "目標日期"]) || "",
+        status: point.status || "pending",
+        result: resultFromStatus(point.status || "pending"),
+        assignee,
+        due,
         sync: "synced",
         updatedAt: new Date().toLocaleString("sv-SE"),
         serverUpdatedAt: Date.now()
-      });
+      };
+      if (recordIndex === -1) {
+        db.records.push({ id: createId("r"), comments: "", photos: [], ...nextRecord });
+      } else {
+        db.records[recordIndex] = {
+          ...db.records[recordIndex],
+          ...nextRecord,
+          comments: db.records[recordIndex].comments || "",
+          photos: db.records[recordIndex].photos || []
+        };
+      }
     }
     imported.push(item);
   }
@@ -342,7 +362,6 @@ app.post("/api/import/equipment", async (request, response) => {
   await writeDb(db);
   response.json({ fileName, importedCount: imported.length, data: db });
 });
-
 app.listen(port, () => {
   console.log(`ELV acceptance API listening on http://127.0.0.1:${port}`);
 });
