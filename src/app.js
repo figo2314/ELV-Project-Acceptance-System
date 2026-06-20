@@ -180,6 +180,7 @@ const fallbackData = {
 };
 
 let state = loadState();
+let adminSearchTimer = null;
 
 init();
 
@@ -628,6 +629,7 @@ function renderProjectSummary(project) {
 
 function renderAdminFilters() {
   const equipmentOptions = getAdminFilteredEquipmentOptions();
+  const searchValue = state.adminSearchDraft ?? state.adminSearch ?? "";
   return `
     <div class="admin-filter-row">
       <label>${t("project")}
@@ -640,7 +642,7 @@ function renderAdminFilters() {
         </select>
       </label>
       <label>${t("search")}
-        <input data-admin-filter="search" value="${escapeHtml(state.adminSearch || "")}" placeholder="${t("search")}" />
+        <input data-admin-filter="search" value="${escapeHtml(searchValue)}" placeholder="${t("search")}" />
       </label>
     </div>
   `;
@@ -737,8 +739,11 @@ function bindEvents() {
   document.querySelector("[data-action='translate']")?.addEventListener("click", translateComment);
   document.querySelector("[data-action='import-excel']")?.addEventListener("change", importExcel);
   document.querySelectorAll("[data-admin-filter]").forEach((field) => {
-    field.addEventListener("change", () => updateAdminFilter(field));
-    field.addEventListener("input", () => updateAdminFilter(field));
+    if (field.dataset.adminFilter === "search") {
+      field.addEventListener("input", () => updateAdminSearch(field.value));
+    } else {
+      field.addEventListener("change", () => updateAdminFilter(field));
+    }
   });
   document.querySelectorAll("[data-project-manager]").forEach((form) => {
     form.addEventListener("submit", saveProjectManager);
@@ -776,10 +781,19 @@ function updateAdminFilter(field) {
   if (field.dataset.adminFilter === "project") {
     patch.adminProjectId = field.value;
     patch.adminEquipmentId = "";
+    patch.adminSearchDraft = state.adminSearch || "";
   }
   if (field.dataset.adminFilter === "equipment") patch.adminEquipmentId = field.value;
-  if (field.dataset.adminFilter === "search") patch.adminSearch = field.value;
   setState(patch);
+}
+
+function updateAdminSearch(value) {
+  state = { ...state, adminSearchDraft: value };
+  saveState();
+  window.clearTimeout(adminSearchTimer);
+  adminSearchTimer = window.setTimeout(() => {
+    setState({ adminSearch: value, adminSearchDraft: value });
+  }, 350);
 }
 
 async function saveInspection(event) {
