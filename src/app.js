@@ -1102,13 +1102,33 @@ function isRecordOverdue(record) {
 }
 
 function renderProjectSelectorCard() {
+  const activeProjectId = state.adminProjectId || state.selectedProjectId;
   return `
     <section class="project-selector-card">
-      <label>
+      <div class="project-selector-head">
         <span>Active Project</span>
-        <select data-admin-filter="project">${state.data.projects.map((project) => option(project.id, project.name, state.adminProjectId || state.selectedProjectId)).join("")}</select>
-      </label>
+        <strong>${state.data.projects.length} ${t("totalProjects")}</strong>
+      </div>
+      <div class="project-option-grid">
+        ${state.data.projects.map((project) => renderProjectOption(project, activeProjectId)).join("")}
+      </div>
     </section>
+  `;
+}
+
+function renderProjectOption(project, activeProjectId) {
+  const records = state.data.records.filter((record) => record.projectId === project.id);
+  const equipment = state.data.equipment.filter((item) => item.projectId === project.id);
+  const stats = getStats(records);
+  return `
+    <button class="project-option ${project.id === activeProjectId ? "active" : ""}" data-admin-project="${project.id}">
+      <span>
+        <strong>${escapeHtml(project.name)}</strong>
+        <small>${escapeHtml(project.client || project.manager || "-")}</small>
+      </span>
+      <em>${stats.completion}%</em>
+      <small>${equipment.length} ${t("equipment")} / ${stats.failed + stats.rectification} ${t("issueQty")}</small>
+    </button>
   `;
 }
 
@@ -1421,6 +1441,9 @@ function bindEvents() {
   document.querySelectorAll("[data-admin-page]").forEach((button) => {
     button.addEventListener("click", () => setAdminPage(button.dataset.adminPage));
   });
+  document.querySelectorAll("[data-admin-project]").forEach((button) => {
+    button.addEventListener("click", () => selectAdminProject(button.dataset.adminProject));
+  });
   document.querySelectorAll("[data-tree-node]").forEach((node) => {
     node.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(node.dataset.treeNode))));
     node.addEventListener("keydown", (event) => {
@@ -1600,6 +1623,15 @@ function goFieldMobileBack() {
     return;
   }
   setState({ fieldMobileLevel: "project", fieldMobilePath: {} });
+}
+
+function selectAdminProject(projectId) {
+  setState({
+    adminProjectId: projectId,
+    adminEquipmentId: "",
+    adminTreeSelection: null,
+    adminSearchDraft: state.adminSearch || ""
+  });
 }
 
 function selectAdminTreeNode(node) {
