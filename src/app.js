@@ -881,10 +881,13 @@ function renderAdminPage() {
           <div class="section-title">${t("treeView")}</div>
           ${renderLocationTree()}
         </aside>
-        <section class="panel data-panel">
-          <div class="section-title">${t("dataTable")}</div>
-          ${renderAdminFilters()}
-          ${renderDataTable()}
+        <section class="data-stack">
+          ${renderProjectSelectorCard()}
+          <section class="panel data-panel">
+            <div class="section-title">${t("dataTable")}</div>
+            ${renderAdminFilters()}
+            ${renderDataTable()}
+          </section>
         </section>
       </section>
     `;
@@ -1098,14 +1101,22 @@ function isRecordOverdue(record) {
   return !Number.isNaN(due.getTime()) && due < today;
 }
 
+function renderProjectSelectorCard() {
+  return `
+    <section class="project-selector-card">
+      <label>
+        <span>Active Project</span>
+        <select data-admin-filter="project">${state.data.projects.map((project) => option(project.id, project.name, state.adminProjectId || state.selectedProjectId)).join("")}</select>
+      </label>
+    </section>
+  `;
+}
+
 function renderAdminFilters() {
   const equipmentOptions = getAdminFilteredEquipmentOptions();
   const searchValue = state.adminSearchDraft ?? state.adminSearch ?? "";
   return `
     <div class="admin-filter-row">
-      <label>${t("project")}
-        <select data-admin-filter="project">${state.data.projects.map((project) => option(project.id, project.name, state.adminProjectId || state.selectedProjectId)).join("")}</select>
-      </label>
       <label>${t("equipment")}
         <select data-admin-filter="equipment">
           <option value="">${t("allEquipment")}</option>
@@ -1183,13 +1194,11 @@ function renderDataTable() {
       <div class="${tableClasses.join(" ")}">
         <div class="excel-row excel-head">
           <span title="${t("project")}">${t("project")}</span>
-          <span title="${t("team")}">Team</span>
           <span title="${t("equipmentName")}">${t("equipmentName")} & Context</span>
           <span title="${t("pointName")}">Point Name</span>
           <span title="${t("pointType")}">Point Type</span>
           <span title="${t("reference")}">${t("reference")}</span>
           <span title="${t("assignee")}">${t("assignee")}</span>
-          <span title="${t("due")}">${t("due")}</span>
           <span title="${t("status")}">${t("status")}</span>
           <span></span>
         </div>
@@ -1203,7 +1212,6 @@ function renderDataRow(row) {
   return `
     <form class="excel-row" data-row-editor data-record-id="${row.record.id}" data-equipment-id="${row.equipment.id}" data-point-id="${row.point.id}">
       <select name="projectId" title="${escapeHtml(getProjectName(row.equipment.projectId))}">${state.data.projects.map((project) => option(project.id, project.name, row.equipment.projectId)).join("")}</select>
-      <input name="team" value="${escapeHtml(row.equipment.team)}" title="${escapeHtml(row.equipment.team)}" />
       <div class="equipment-context-cell" title="${escapeHtml(`${row.equipment.name} / ${row.equipment.type} / ${getLocationName(row.equipment.locationId)}`)}">
         <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" />
         <input name="equipmentType" type="hidden" value="${escapeHtml(row.equipment.type)}" />
@@ -1214,7 +1222,6 @@ function renderDataRow(row) {
       <input name="pointType" value="${escapeHtml(row.point.type)}" title="${escapeHtml(row.point.type)}" />
       <input name="reference" value="${escapeHtml(row.point.reference || "")}" title="${escapeHtml(row.point.reference || "")}" />
       <input name="assignee" value="${escapeHtml(row.record.assignee || "")}" title="${escapeHtml(row.record.assignee || "")}" />
-      <input name="due" value="${escapeHtml(row.record.due || "")}" title="${escapeHtml(row.record.due || "")}" />
       <select class="status-select ${row.record.status}" name="status" title="${statusLabel(row.record.status)}">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
       <button class="ghost" type="submit">${t("saveChanges")}</button>
     </form>
