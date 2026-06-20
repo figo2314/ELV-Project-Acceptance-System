@@ -650,9 +650,79 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
+.dashboard-hero {
+  background: #143f55;
+  border-radius: 8px;
+  color: #fff;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.8fr);
+  padding: 24px;
+}
+
+.dashboard-hero h2 {
+  font-size: 96px;
+  line-height: 0.9;
+  margin: 4px 0;
+}
+
+.dashboard-hero .eyebrow,
+.dashboard-hero span {
+  color: #c9e5eb;
+}
+
+.hero-kpis {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.kpi-card {
+  background: rgb(255 255 255 / 10%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.kpi-card strong {
+  display: block;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.kpi-card span {
+  color: #c9e5eb;
+  display: block;
+  margin-top: 8px;
+}
+
+.kpi-card.warn {
+  background: rgb(255 210 90 / 18%);
+}
+
+.kpi-card.danger {
+  background: rgb(255 115 105 / 18%);
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+}
+
+.project-rank,
+.attention-panel {
+  align-content: start;
+  display: grid;
+  gap: 12px;
+}
+
 .project-card {
+  border: 1px solid #dfe7e5;
+  border-radius: 8px;
   display: grid;
   gap: 14px;
+  padding: 14px;
 }
 
 .manager-row {
@@ -664,6 +734,18 @@ textarea {
 
 .manager-row h2 {
   margin: 0;
+}
+
+.project-progress-line {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 54px 1fr;
+}
+
+.project-progress-line > span {
+  color: #174f6f;
+  font-weight: 800;
 }
 
 .admin-filter-row {
@@ -792,9 +874,19 @@ textarea {
   .desktop-grid,
   .field-grid,
   .admin-shell,
+  .dashboard-hero,
+  .dashboard-grid,
   .admin-filter-row,
   .manager-row {
     grid-template-columns: 1fr;
+  }
+
+  .hero-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-hero h2 {
+    font-size: 64px;
   }
 
   .admin-sidebar {

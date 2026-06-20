@@ -87,7 +87,18 @@ const dictionary = {
     navData: "Data Table",
     navImport: "Import & Sync",
     navIssues: "Issues",
-    navPeople: "People"
+    navPeople: "People",
+    portfolioHealth: "Portfolio Health",
+    totalProjects: "Projects",
+    totalEquipment: "Equipment",
+    totalPoints: "Points",
+    passRate: "Pass Rate",
+    riskLoad: "Risk Load",
+    unassigned: "Unassigned",
+    overdue: "Overdue",
+    projectRank: "Project Performance",
+    attentionNow: "Needs Attention",
+    noIssues: "No open issues"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -549,10 +560,43 @@ function renderAdminPage() {
   if (state.adminPage === "issues") return renderIssuesPage();
   if (state.adminPage === "people") return renderPeoplePage();
   return `
-    <section class="project-dashboard">
-      ${state.data.projects.map(renderProjectSummary).join("")}
+    ${renderDashboardHero()}
+    <section class="dashboard-grid">
+      <section class="panel project-rank">
+        <div class="section-title">${t("projectRank")}</div>
+        ${state.data.projects.map(renderProjectSummary).join("")}
+      </section>
+      <section class="panel attention-panel">
+        <div class="section-title">${t("attentionNow")}</div>
+        ${renderAttentionList()}
+      </section>
     </section>
   `;
+}
+
+function renderDashboardHero() {
+  const metrics = getDashboardMetrics();
+  return `
+    <section class="dashboard-hero">
+      <div>
+        <p class="eyebrow">${t("portfolioHealth")}</p>
+        <h2>${metrics.completion}%</h2>
+        <span>${metrics.passed}/${metrics.total} ${t("inspectedQty")}</span>
+      </div>
+      <div class="hero-kpis">
+        ${renderKpi(t("totalProjects"), metrics.projects)}
+        ${renderKpi(t("totalEquipment"), metrics.equipment)}
+        ${renderKpi(t("totalPoints"), metrics.points)}
+        ${renderKpi(t("issueQty"), metrics.issues, "danger")}
+        ${renderKpi(t("unassigned"), metrics.unassigned, metrics.unassigned ? "warn" : "")}
+        ${renderKpi(t("overdue"), metrics.overdue, metrics.overdue ? "danger" : "")}
+      </div>
+    </section>
+  `;
+}
+
+function renderKpi(label, value, tone = "") {
+  return `<div class="kpi-card ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
 }
 
 function renderImportPage() {
@@ -604,7 +648,7 @@ function renderProjectSummary(project) {
   const points = state.data.points.filter((point) => equipment.some((item) => item.id === point.equipmentId));
   const stats = getStats(records);
   return `
-    <section class="panel project-card">
+    <section class="project-card">
       <form data-project-manager="${project.id}" class="manager-row">
         <div>
           <p class="eyebrow">${escapeHtml(project.client || "-")}</p>
@@ -622,9 +666,18 @@ function renderProjectSummary(project) {
         ${statCard(t("pending"), stats.pending)}
         ${statCard(t("issueQty"), stats.failed + stats.rectification)}
       </div>
-      <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
+      <div class="project-progress-line">
+        <span>${stats.completion}%</span>
+        <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
+      </div>
     </section>
   `;
+}
+
+function renderAttentionList() {
+  const records = state.data.records.filter((record) => ["failed", "rectification", "pending"].includes(record.status)).slice(0, 8);
+  if (!records.length) return `<div class="empty small">${t("noIssues")}</div>`;
+  return records.map(renderIssueRow).join("");
 }
 
 function renderAdminFilters() {
@@ -995,6 +1048,26 @@ function getStats(records = state.data.records) {
   const rectification = records.filter((record) => record.status === "rectification").length;
   const pending = records.filter((record) => record.status === "pending").length;
   return { total, passed, failed, rectification, pending, completion: total ? Math.round((passed / total) * 100) : 0 };
+}
+
+function getDashboardMetrics() {
+  const stats = getStats();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const overdue = state.data.records.filter((record) => {
+    if (!record.due || ["passed", "closed"].includes(record.status)) return false;
+    const due = new Date(record.due);
+    return !Number.isNaN(due.getTime()) && due < today;
+  }).length;
+  return {
+    ...stats,
+    projects: state.data.projects.length,
+    equipment: state.data.equipment.length,
+    points: state.data.points.length,
+    issues: stats.failed + stats.rectification,
+    unassigned: state.data.records.filter((record) => !record.assignee).length,
+    overdue
+  };
 }
 
 function getPeopleStats() {
