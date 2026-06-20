@@ -328,6 +328,7 @@ function defaultState() {
     adminSearch: "",
     adminPage: "dashboard",
     adminTreeSelection: null,
+    collapsedTreeNodes: [],
     dashboardFilter: "all",
     selectedIssueId: "",
     importPreview: null,
@@ -1122,32 +1123,54 @@ function renderLocationTree() {
   const projectId = state.adminProjectId || state.selectedProjectId;
   const project = state.data.projects.find((item) => item.id === projectId);
   const tree = buildLocationTree(projectId);
+  const projectNode = { type: "project", projectId, label: project?.name || t("allNodes"), children: tree };
   return `
-    <div class="tree-view">
-      ${renderTreeNode({ type: "project", projectId, label: project?.name || t("allNodes") }, 0)}
-      ${[...tree.values()].map((building) => renderTreeBranch(building, 1)).join("")}
+    <div class="tree-view location-tree-view">
+      ${renderTreeBranch(projectNode, 0)}
     </div>
   `;
 }
 
 function renderTreeBranch(node, level) {
   const children = node.children ? [...node.children.values()].map((child) => renderTreeBranch(child, level + 1)).join("") : "";
-  const equipment = node.equipment ? node.equipment.map((item) => renderTreeNode({ type: "equipment", projectId: item.projectId, locationId: item.locationId, equipmentId: item.id, label: item.name }, level + 1)).join("") : "";
-  return `${renderTreeNode(node, level)}${children}${equipment}`;
+  const equipment = node.equipment ? node.equipment.map((item) => renderEquipmentTreeLeaf(item, level + 1)).join("") : "";
+  const childContent = `${children}${equipment}`;
+  const hasChildren = Boolean(childContent);
+  const collapsed = hasChildren && isTreeCollapsed(node);
+  return `
+    <div class="tree-branch">
+      ${renderTreeNode(node, level, hasChildren, collapsed)}
+      ${hasChildren && !collapsed ? `<div class="tree-children" style="--level:${level}">${childContent}</div>` : ""}
+    </div>
+  `;
 }
 
-function renderTreeNode(node, level) {
+function renderEquipmentTreeLeaf(item, level) {
+  const node = { type: "equipment", projectId: item.projectId, locationId: item.locationId, equipmentId: item.id, label: item.name };
+  return `<div class="tree-branch">${renderTreeNode(node, level, false, false)}</div>`;
+}
+
+function renderTreeNode(node, level, hasChildren = false, collapsed = false) {
   const selected = isTreeSelected(node);
   const stats = getTreeNodeStats(node);
   const tone = getTreeNodeTone(stats);
+  const encoded = encodeTreeNode(node);
+  const levelClass = `tree-level-${Math.min(level, 4)}`;
   return `
-    <button class="tree-node ${selected ? "active" : ""}" style="--level:${level}" data-tree-node="${encodeTreeNode(node)}">
-      <span>${escapeHtml(node.label)}</span>
+    <div class="tree-node ${levelClass} ${hasChildren ? "has-children" : ""} ${collapsed ? "collapsed" : ""} ${selected ? "active" : ""}" style="--level:${level}" role="button" tabindex="0" data-tree-node="${encoded}" ${hasChildren ? `aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
+      <span class="tree-label">
+        ${
+          hasChildren
+            ? `<button class="tree-toggle" type="button" data-tree-toggle="${encoded}" aria-label="${collapsed ? "Expand" : "Collapse"}"><span class="tree-caret">▶</span></button>`
+            : `<span class="tree-toggle-spacer"></span>`
+        }
+        <span class="tree-title">${escapeHtml(node.label)}</span>
+      </span>
       <span class="tree-meta" title="${stats.failed + stats.rectification} ${t("issueQty")} / ${stats.pending} ${t("pending")}">
         <i class="tree-status-dot ${tone}"></i>
-        <small>${stats.passed}/${stats.total}</small>
+        <small class="tree-count">${stats.passed}/${stats.total}</small>
       </span>
-    </button>
+    </div>
   `;
 }
 
@@ -1390,8 +1413,19 @@ function bindEvents() {
   document.querySelectorAll("[data-admin-page]").forEach((button) => {
     button.addEventListener("click", () => setAdminPage(button.dataset.adminPage));
   });
-  document.querySelectorAll("[data-tree-node]").forEach((button) => {
-    button.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(button.dataset.treeNode))));
+  document.querySelectorAll("[data-tree-node]").forEach((node) => {
+    node.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(node.dataset.treeNode))));
+    node.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      selectAdminTreeNode(JSON.parse(decodeURIComponent(node.dataset.treeNode)));
+    });
+  });
+  document.querySelectorAll("[data-tree-toggle]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleTreeNode(button.dataset.treeToggle);
+    });
   });
   document.querySelectorAll("[data-field-tree-node]").forEach((button) => {
     button.addEventListener("click", () => selectFieldTreeNode(JSON.parse(decodeURIComponent(button.dataset.fieldTreeNode))));
@@ -1568,6 +1602,16 @@ function selectAdminTreeNode(node) {
   };
   patch.adminEquipmentId = node.type === "equipment" ? node.equipmentId : "";
   setState(patch);
+}
+
+function toggleTreeNode(encodedNode) {
+  const collapsed = new Set(state.collapsedTreeNodes || []);
+  if (collapsed.has(encodedNode)) {
+    collapsed.delete(encodedNode);
+  } else {
+    collapsed.add(encodedNode);
+  }
+  setState({ collapsedTreeNodes: [...collapsed] });
 }
 
 function updateAdminFilter(field) {
@@ -1949,6 +1993,10 @@ function isTreeSelected(node) {
   const selected = state.adminTreeSelection;
   if (!selected) return node.type === "project";
   return encodeTreeNode(selected) === encodeTreeNode(node);
+}
+
+function isTreeCollapsed(node) {
+  return (state.collapsedTreeNodes || []).includes(encodeTreeNode(node));
 }
 
 function getTreeNodeStats(node) {

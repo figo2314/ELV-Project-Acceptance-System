@@ -1417,43 +1417,78 @@ button.kpi-card.active {
 
 .tree-view {
   display: grid;
-  gap: 4px;
+  gap: 2px;
+}
+
+.tree-branch {
+  min-width: 0;
+}
+
+.tree-children {
+  border-left: 1px solid #e2e8f0;
+  display: grid;
+  gap: 2px;
+  margin-left: 14px;
+  padding-left: 7px;
 }
 
 .tree-node {
   align-items: center;
   background: transparent;
   border: 0;
+  border-left: 4px solid transparent;
   border-radius: 8px;
-  color: #263941;
   display: flex;
-  gap: 6px;
+  gap: 10px;
   justify-content: space-between;
   min-height: 34px;
-  padding: 0 6px 0 clamp(6px, calc(6px + var(--level) * 14px), 52px);
+  padding: 0 8px 0 6px;
   text-align: left;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
   width: 100%;
 }
 
 .tree-node:hover {
-  background: var(--panel-soft);
+  background: #f8fafc;
 }
 
 .tree-node.active {
-  background: var(--brand);
-  color: #fff;
+  background: #eff6ff;
+  border-left-color: #2563eb;
+  color: #2563eb;
+  font-weight: 700;
 }
 
-.tree-node small {
-  color: #66777d;
-  font-size: 11px;
+.tree-level-0 {
+  color: #1e293b;
+  font-weight: 800;
 }
 
-.tree-node.active small {
-  color: #d9f99d;
+.location-tree-view > .tree-branch > .tree-node {
+  min-height: 38px;
 }
 
-.tree-node > span:first-child {
+.tree-level-1,
+.tree-level-2 {
+  color: #475569;
+  font-weight: 650;
+}
+
+.tree-level-3,
+.tree-level-4 {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.tree-label {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -1461,20 +1496,71 @@ button.kpi-card.active {
   white-space: nowrap;
 }
 
+.tree-toggle,
+.tree-toggle-spacer {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #94a3b8;
+  display: inline-flex;
+  flex: 0 0 18px;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 18px;
+}
+
+.tree-toggle {
+  cursor: pointer;
+}
+
+.tree-toggle:hover {
+  color: #2563eb;
+}
+
+.tree-caret {
+  display: inline-block;
+  font-size: 10px;
+  transform: rotate(90deg);
+  transition: transform 0.16s ease;
+}
+
+.tree-node.collapsed .tree-caret {
+  transform: rotate(0deg);
+}
+
 .tree-meta {
   align-items: center;
   display: inline-flex;
-  flex: 0 0 42px;
-  gap: 5px;
+  flex: 0 0 auto;
+  gap: 7px;
   justify-content: flex-end;
+  margin-left: auto;
+}
+
+.tree-count {
+  background: #f1f5f9;
+  border-radius: 999px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 34px;
+  padding: 4px 7px;
+  text-align: center;
+}
+
+.tree-node.active .tree-count {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .tree-status-dot {
   border-radius: 999px;
-  box-shadow: 0 0 0 2px rgb(255 255 255 / 70%);
+  box-shadow: 0 0 0 3px #fff;
   display: inline-block;
-  height: 9px;
-  width: 9px;
+  height: 8px;
+  width: 8px;
 }
 
 .tree-status-dot.empty {
@@ -1494,7 +1580,7 @@ button.kpi-card.active {
 }
 
 .tree-node.active .tree-status-dot {
-  box-shadow: 0 0 0 2px rgb(255 255 255 / 90%);
+  box-shadow: 0 0 0 3px #eff6ff;
 }
 
 .excel-table-wrap {
