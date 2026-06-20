@@ -1,5 +1,6 @@
 const STORAGE_KEY = "elv-acceptance-offline-v2";
 const API_BASE = "http://127.0.0.1:4177/api";
+const KNOWN_EQUIPMENT_TYPES = ["DDC Panel", "Temperature Sensor", "Air Handling Unit", "Lighting Panel", "Power Meter", "Controller", "Sensor", "Actuator", "Valve", "Meter", "Equipment"];
 
 const dictionary = {
   en: {
@@ -101,7 +102,17 @@ const dictionary = {
     noIssues: "No open issues",
     editPoint: "Edit Point",
     fieldAddPoint: "Add Site Point",
-    pointSaved: "Point saved"
+    pointSaved: "Point saved",
+    dropExcel: "Drop Excel point schedule here",
+    validateExcel: "Validate Excel",
+    importValidated: "Import Validated File",
+    validationPassed: "Validation passed",
+    validationErrors: "Errors",
+    validationWarnings: "Warnings",
+    previewRows: "Preview rows",
+    duplicatePoint: "Duplicate point",
+    unknownType: "Unknown equipment type",
+    missingColumn: "Missing required column"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -221,6 +232,7 @@ function defaultState() {
     adminEquipmentId: "",
     adminSearch: "",
     adminPage: "dashboard",
+    importPreview: null,
     serverOnline: false,
     data: structuredClone(fallbackData)
   };
@@ -630,20 +642,52 @@ function renderKpi(label, value, tone = "") {
 }
 
 function renderImportPage() {
+  const preview = state.importPreview;
   return `
-    <section class="panel admin-tools">
+    <section class="panel import-panel">
       <div>
         <div class="section-title">${t("navImport")}</div>
         <p class="muted">${t("templateHint")}</p>
       </div>
-      <label class="file-button">${t("importExcel")}
+      <label class="drop-zone" data-drop-zone>
+        <strong>${t("dropExcel")}</strong>
+        <span>${t("templateHint")}</span>
         <input data-action="import-excel" type="file" accept=".xlsx,.xls,.csv" />
       </label>
-      <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
-      <button class="primary sync" data-action="sync">${t("syncNow")}</button>
+      <div class="import-actions">
+        <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
+        <button class="primary" data-action="commit-import" ${preview?.errors?.length ? "disabled" : ""}>${t("importValidated")}</button>
+        <button class="ghost" data-action="sync">${t("syncNow")}</button>
+      </div>
+      ${preview ? renderImportPreview(preview) : ""}
       ${state.conflicts.length ? `<div class="section-title">${t("syncConflicts")}</div>${state.conflicts.map((item) => `<p class="muted">${escapeHtml(item.local.title)}</p>`).join("")}` : ""}
     </section>
   `;
+}
+
+function renderImportPreview(preview) {
+  return `
+    <div class="validation-grid">
+      ${renderValidationCard(t("previewRows"), preview.rows.length)}
+      ${renderValidationCard(t("validationErrors"), preview.errors.length, preview.errors.length ? "danger" : "")}
+      ${renderValidationCard(t("validationWarnings"), preview.warnings.length, preview.warnings.length ? "warn" : "")}
+    </div>
+    <div class="validation-list">
+      ${preview.errors.map((item) => `<div class="validation-item danger">${escapeHtml(item)}</div>`).join("")}
+      ${preview.warnings.map((item) => `<div class="validation-item warn">${escapeHtml(item)}</div>`).join("")}
+      ${!preview.errors.length && !preview.warnings.length ? `<div class="validation-item ok">${t("validationPassed")}</div>` : ""}
+    </div>
+    <div class="preview-table">
+      ${preview.rows
+        .slice(0, 8)
+        .map((row, index) => `<div><strong>#${index + 1}</strong><span>${escapeHtml(row.Project || "")}</span><span>${escapeHtml(row.Equipment || "")}</span><span>${escapeHtml(row.Point || "")}</span></div>`)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderValidationCard(label, value, tone = "") {
+  return `<div class="validation-card ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
 }
 
 function renderIssuesPage() {
@@ -823,7 +867,20 @@ function bindEvents() {
   });
   document.querySelector("[data-action='sync']")?.addEventListener("click", () => syncRecords(true));
   document.querySelector("[data-action='translate']")?.addEventListener("click", translateComment);
-  document.querySelector("[data-action='import-excel']")?.addEventListener("change", importExcel);
+  document.querySelector("[data-action='import-excel']")?.addEventListener("change", (event) => validateExcelFile(event.target.files[0]));
+  document.querySelector("[data-action='commit-import']")?.addEventListener("click", commitValidatedImport);
+  document.querySelector("[data-drop-zone]")?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.currentTarget.classList.add("dragging");
+  });
+  document.querySelector("[data-drop-zone]")?.addEventListener("dragleave", (event) => {
+    event.currentTarget.classList.remove("dragging");
+  });
+  document.querySelector("[data-drop-zone]")?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.currentTarget.classList.remove("dragging");
+    validateExcelFile(event.dataTransfer.files[0]);
+  });
   document.querySelectorAll("[data-admin-filter]").forEach((field) => {
     if (field.dataset.adminFilter === "search") {
       field.addEventListener("input", () => updateAdminSearch(field.value));
@@ -958,13 +1015,26 @@ async function syncRecords(showToast) {
   }
 }
 
-async function importExcel(event) {
-  const file = event.target.files[0];
+async function validateExcelFile(file) {
   if (!file) return;
-  const base64 = await fileToBase64(file);
   try {
-    const response = await apiPost("/import/equipment", { fileName: file.name, base64 });
+    const rows = await readExcelRows(file);
+    const preview = validateImportRows(rows);
+    preview.fileName = file.name;
+    preview.base64 = await fileToBase64(file);
+    setState({ importPreview: preview });
+  } catch {
+    flash("Unable to read Excel file");
+  }
+}
+
+async function commitValidatedImport() {
+  const preview = state.importPreview;
+  if (!preview || preview.errors.length) return;
+  try {
+    const response = await apiPost("/import/equipment", { fileName: preview.fileName, base64: preview.base64 });
     setData(response.data);
+    setState({ importPreview: null });
     flash(`${t("importSuccess")}: ${response.importedCount}`);
   } catch {
     flash(t("serverOffline"));
@@ -1190,6 +1260,59 @@ function fileToDataUrl(file) {
     reader.onload = () => resolve(reader.result);
     reader.readAsDataURL(file);
   });
+}
+
+async function readExcelRows(file) {
+  const XLSX = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { defval: "" }).map(normalizeImportRow).filter((row) => row.Project || row.Location || row.Equipment || row.Point);
+}
+
+function normalizeImportRow(row) {
+  return {
+    Project: pickImportValue(row, ["Project", "項目"]),
+    Location: pickImportValue(row, ["Location", "Area", "地點", "位置"]),
+    Team: pickImportValue(row, ["Team", "Category", "System", "團隊", "分類", "系統"]),
+    Equipment: pickImportValue(row, ["Equipment", "Equipment Name", "Name", "Device", "設備", "設備名稱"]),
+    Type: pickImportValue(row, ["Type", "Equipment Type", "類型"]),
+    Point: pickImportValue(row, ["Point", "Point Name", "Sub Device", "點位", "子設備"]),
+    "Point Type": pickImportValue(row, ["Point Type", "Signal Type", "點位類型"]),
+    Reference: pickImportValue(row, ["Reference", "Expected", "標準", "參考"]),
+    Assignee: pickImportValue(row, ["Assignee", "Owner", "負責人"]),
+    Due: pickImportValue(row, ["Due", "Target Date", "目標日期"])
+  };
+}
+
+function validateImportRows(rows) {
+  const errors = [];
+  const warnings = [];
+  const required = ["Project", "Location", "Equipment", "Point"];
+  const seen = new Map();
+
+  rows.forEach((row, index) => {
+    const rowNo = index + 2;
+    required.forEach((column) => {
+      if (!row[column]) errors.push(`${t("missingColumn")} ${column} @ row ${rowNo}`);
+    });
+    const key = [row.Project, row.Location, row.Equipment, row.Point].map((value) => String(value).trim().toLowerCase()).join("|");
+    if (seen.has(key)) errors.push(`${t("duplicatePoint")} @ rows ${seen.get(key)} and ${rowNo}: ${row.Equipment} / ${row.Point}`);
+    if (key !== "|||") seen.set(key, rowNo);
+    if (row.Type && !KNOWN_EQUIPMENT_TYPES.some((type) => type.toLowerCase() === row.Type.toLowerCase())) {
+      warnings.push(`${t("unknownType")} @ row ${rowNo}: ${row.Type}`);
+    }
+  });
+
+  return { rows, errors, warnings };
+}
+
+function pickImportValue(row, names) {
+  for (const name of names) {
+    const value = row[name];
+    if (value !== undefined && String(value).trim()) return String(value).trim();
+  }
+  return "";
 }
 
 function fileToBase64(file) {

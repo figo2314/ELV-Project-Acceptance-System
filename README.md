@@ -13,6 +13,7 @@ Offline-first web prototype for ELV/BMS project acceptance, inspection records, 
 - English-first UI with Traditional Chinese toggle
 - Equipment, point, and sub-device hierarchy for BMS/ELV inspections
 - Admin equipment manager with Excel import, template download, direct web edit/update, and Excel-like row editing
+- Import & Sync supports drag-and-drop Excel validation before committing data to the database
 - Local browser storage for records, camera photos, and file attachments
 - Offline status indicator, pending-sync queue, and API-backed sync
 - PWA manifest and service worker cache for offline loading
@@ -45,6 +46,8 @@ Changes are saved to the local API database at `data/db.json`.
 ## Excel Import
 
 Use the Admin tab, click `Download Excel Template`, fill it in, then upload `.xlsx`, `.xls`, or `.csv` with `Import Excel`.
+
+The Import & Sync page validates files in the browser before writing to the database. It blocks duplicate points under the same project/location/equipment and missing required columns, and warns about unknown equipment types.
 
 Supported column names:
 
