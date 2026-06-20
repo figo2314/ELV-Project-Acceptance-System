@@ -404,14 +404,17 @@ function renderTopbar() {
   const onlineText = navigator.onLine && state.serverOnline ? t("online") : t("offline");
   return `
     <header class="topbar">
-      <div>
-        <p class="eyebrow">${onlineText} / ${pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced")}</p>
+      <div class="topbar-brand">
         <div class="brand-row"><span class="logo-mark">${t("logoText")}</span><h1>${t("appName")}</h1></div>
       </div>
-      <div class="actions">
-        <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
-        <button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>
-        <button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin">${t("admin")}</button>
+      ${state.view === "admin" ? `<nav class="top-nav">${renderAdminNavItem("dashboard", t("navDashboard"))}${renderAdminNavItem("data", t("navData"))}${renderAdminNavItem("import", t("navImport"))}${renderAdminNavItem("issues", t("navIssues"))}${renderAdminNavItem("people", t("navPeople"))}</nav>` : ""}
+      <div class="topbar-actions">
+        <span class="sync-pill">${onlineText} / ${pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced")}</span>
+        <div class="actions">
+          <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
+          <button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>
+          <button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin">${t("admin")}</button>
+        </div>
       </div>
     </header>
   `;
@@ -845,21 +848,7 @@ function renderInspectionForm(record) {
 }
 
 function renderAdmin() {
-  return `
-    <section class="admin-shell">
-      <aside class="admin-sidebar">
-        <div class="admin-side-title">${t("admin")}</div>
-        ${renderAdminNavItem("dashboard", t("navDashboard"))}
-        ${renderAdminNavItem("data", t("navData"))}
-        ${renderAdminNavItem("import", t("navImport"))}
-        ${renderAdminNavItem("issues", t("navIssues"))}
-        ${renderAdminNavItem("people", t("navPeople"))}
-      </aside>
-      <section class="admin-main">
-        ${renderAdminPage()}
-      </section>
-    </section>
-  `;
+  return `<section class="admin-main">${renderAdminPage()}</section>`;
 }
 
 function renderAdminNavItem(page, label) {
