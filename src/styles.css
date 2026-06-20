@@ -1394,7 +1394,7 @@ button.kpi-card.active {
 .data-workbench {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(240px, var(--tree-width, 300px)) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, min(var(--tree-width, 300px), 520px)) minmax(0, 1fr);
   min-height: calc(100vh - 132px);
   min-width: 0;
   width: 100%;
@@ -1528,6 +1528,28 @@ button.kpi-card.active {
   top: 12px;
   width: 12px;
   z-index: 20;
+}
+
+.tree-auto-width {
+  background: #f8fafc;
+  border: 1px solid #dbe5e2;
+  border-radius: 999px;
+  bottom: 12px;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  min-height: 28px;
+  padding: 0 10px;
+  position: absolute;
+  right: 12px;
+  z-index: 21;
+}
+
+.tree-auto-width:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .tree-resize-handle::after {

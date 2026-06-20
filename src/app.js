@@ -329,7 +329,8 @@ function defaultState() {
     adminPage: "dashboard",
     adminTreeSelection: null,
     collapsedTreeNodes: [],
-    adminTreeWidth: 300,
+    adminTreeWidth: null,
+    adminTreeWidthManual: false,
     dashboardFilter: "all",
     selectedIssueId: "",
     importPreview: null,
@@ -342,7 +343,12 @@ function loadState() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return defaultState();
-    return { ...defaultState(), ...JSON.parse(stored) };
+    const parsed = JSON.parse(stored);
+    if (parsed.adminTreeWidthManual !== true) {
+      parsed.adminTreeWidth = null;
+      parsed.adminTreeWidthManual = false;
+    }
+    return { ...defaultState(), ...parsed };
   } catch (error) {
     console.warn("Unable to load saved ELV state. Falling back to defaults.", error);
     try {
@@ -876,12 +882,14 @@ function renderAdminNavItem(page, label) {
 
 function renderAdminPage() {
   if (state.adminPage === "data") {
+    const treeWidth = getAdminTreeWidth();
     return `
-      <section class="data-workbench" style="--tree-width:${Number(state.adminTreeWidth) || 300}px">
+      <section class="data-workbench" style="--tree-width:${treeWidth}px">
         <aside class="panel tree-panel">
           <div class="section-title">${t("treeView")}</div>
           ${renderLocationTree()}
           <span class="tree-resize-handle" data-tree-resize title="Resize tree"></span>
+          ${state.adminTreeWidthManual ? `<button class="tree-auto-width" data-tree-auto-width title="Auto fit tree width">Auto</button>` : ""}
         </aside>
         <section class="data-stack">
           ${renderProjectSelectorCard()}
@@ -1189,6 +1197,49 @@ function renderTreeBranch(node, level) {
   `;
 }
 
+function getAdminTreeWidth() {
+  if (state.adminTreeWidthManual && state.adminTreeWidth) return clampTreeWidth(state.adminTreeWidth);
+  const projectId = state.adminProjectId || state.selectedProjectId;
+  const project = state.data.projects.find((item) => item.id === projectId);
+  const tree = buildLocationTree(projectId);
+  const projectNode = { type: "project", projectId, label: project?.name || t("allNodes"), children: tree };
+  const visibleNodes = collectVisibleTreeNodes(projectNode, 0);
+  const estimated = visibleNodes.reduce((width, item) => Math.max(width, estimateTreeNodeWidth(item.node, item.level)), 260);
+  return clampTreeWidth(estimated);
+}
+
+function collectVisibleTreeNodes(node, level) {
+  const nodes = [{ node, level }];
+  if (isTreeCollapsed(node)) return nodes;
+  if (node.children) {
+    [...node.children.values()].forEach((child) => nodes.push(...collectVisibleTreeNodes(child, level + 1)));
+  }
+  if (node.equipment) {
+    node.equipment.forEach((item) =>
+      nodes.push({
+        node: { type: "equipment", projectId: item.projectId, locationId: item.locationId, equipmentId: item.id, label: item.name },
+        level: level + 1
+      })
+    );
+  }
+  return nodes;
+}
+
+function estimateTreeNodeWidth(node, level) {
+  const stats = getTreeNodeStats(node);
+  const subtitle = getTreeNodeSubtitle(node, stats);
+  const labelWidth = estimateTextWidth(node.label, node.type === "equipment" ? 8.2 : 9);
+  const subtitleWidth = subtitle ? estimateTextWidth(subtitle, 6.2) : 0;
+  const textWidth = Math.max(labelWidth, subtitleWidth);
+  const guideWidth = level * 22;
+  const chromeWidth = 96;
+  return guideWidth + textWidth + chromeWidth;
+}
+
+function estimateTextWidth(text, averageCharWidth) {
+  return String(text || "").length * averageCharWidth;
+}
+
 function renderEquipmentTreeLeaf(item, level) {
   const node = { type: "equipment", projectId: item.projectId, locationId: item.locationId, equipmentId: item.id, label: item.name };
   return `<div class="tree-branch">${renderTreeNode(node, level, false, false)}</div>`;
@@ -1462,6 +1513,7 @@ function bindEvents() {
     button.addEventListener("click", () => selectAdminProject(button.dataset.adminProject));
   });
   document.querySelector("[data-tree-resize]")?.addEventListener("pointerdown", startTreeResize);
+  document.querySelector("[data-tree-auto-width]")?.addEventListener("click", () => setState({ adminTreeWidth: null, adminTreeWidthManual: false }));
   document.querySelectorAll("[data-tree-node]").forEach((node) => {
     node.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(node.dataset.treeNode))));
     node.addEventListener("keydown", (event) => {
@@ -1559,7 +1611,7 @@ function bindEvents() {
 function startTreeResize(event) {
   event.preventDefault();
   const startX = event.clientX;
-  const startWidth = Number(state.adminTreeWidth) || 300;
+  const startWidth = getAdminTreeWidth();
   const workbench = document.querySelector(".data-workbench");
   let nextWidth = startWidth;
   document.body.classList.add("resizing-tree");
@@ -1571,7 +1623,7 @@ function startTreeResize(event) {
     document.removeEventListener("pointermove", move);
     document.removeEventListener("pointerup", stop);
     document.body.classList.remove("resizing-tree");
-    setState({ adminTreeWidth: nextWidth }, false);
+    setState({ adminTreeWidth: nextWidth, adminTreeWidthManual: true }, false);
   };
   document.addEventListener("pointermove", move);
   document.addEventListener("pointerup", stop);
@@ -1674,7 +1726,7 @@ function selectAdminProject(projectId) {
 }
 
 function clampTreeWidth(width) {
-  return Math.max(240, Math.min(460, Math.round(width)));
+  return Math.max(240, Math.min(520, Math.round(width)));
 }
 
 function selectAdminTreeNode(node) {
