@@ -5,6 +5,7 @@ Offline-first web prototype for ELV/BMS project acceptance, inspection records, 
 ## Current MVP
 
 - Mobile-friendly project, location, team/category, equipment, and inspection flow
+- Field workflow with project/location/team filters, equipment cards, point action list, quick Pass/Fail/N/A, and shared comment suggestions
 - Desktop dashboard with project progress, open issues, and person statistics
 - English-first UI with Traditional Chinese toggle
 - Equipment, point, and sub-device hierarchy for BMS/ELV inspections

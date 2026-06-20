@@ -60,7 +60,15 @@ const dictionary = {
     saveChanges: "Save",
     updateSuccess: "Data updated",
     type: "Type",
-    reference: "Reference"
+    reference: "Reference",
+    equipmentCards: "Equipment Cards",
+    items: "Items",
+    quickActions: "Quick Actions",
+    addComment: "Comment",
+    commentPlaceholder: "Type a comment. Previous comments are suggested automatically.",
+    selectedEquipment: "Selected Equipment",
+    noEquipment: "No equipment in this project/location/team",
+    logoText: "ELV"
   },
   zh: {
     appName: "ELV 項目驗收系統",
@@ -249,7 +257,7 @@ function renderTopbar() {
     <header class="topbar">
       <div>
         <p class="eyebrow">${onlineText} / ${pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced")}</p>
-        <h1>${t("appName")}</h1>
+        <div class="brand-row"><span class="logo-mark">${t("logoText")}</span><h1>${t("appName")}</h1></div>
       </div>
       <div class="actions">
         <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "中"}</button>
@@ -261,17 +269,14 @@ function renderTopbar() {
 }
 
 function renderField() {
-  const selectedRecord = state.data.records.find((record) => record.id === state.selectedRecordId);
   return `
-    <section class="mobile-grid">
-      <aside class="panel stack">
-        <input class="search" placeholder="${t("search")}" />
+    <section class="field-grid">
+      <aside class="panel stack field-sidebar">
         ${renderSelectors()}
-        ${renderQuickStats(getFilteredRecords())}
-        ${renderPointNavigator()}
+        ${renderEquipmentCards()}
       </aside>
-      <section class="panel detail">
-        ${selectedRecord ? renderInspectionForm(selectedRecord) : `<div class="empty">${t("noRecord")}</div>`}
+      <section class="panel detail field-detail">
+        ${renderFieldOperation()}
       </section>
     </section>
   `;
@@ -299,11 +304,104 @@ function renderSelectors() {
         ${teams.map((team) => option(team, team, state.selectedTeam)).join("")}
       </select>
     </label>
-    <label>${t("equipment")}
-      <select data-field="selectedEquipmentId">
-        ${teamEquipment.map((item) => option(item.id, `${item.name} / ${item.type}`, state.selectedEquipmentId)).join("")}
-      </select>
-    </label>
+  `;
+}
+
+function renderEquipmentCards() {
+  const equipment = getVisibleEquipment();
+  return `
+    <div class="section-title">${t("equipmentCards")}</div>
+    <div class="equipment-card-grid">
+      ${equipment
+        .map((item) => {
+          const records = state.data.records.filter((record) => record.equipmentId === item.id);
+          const stats = getStats(records);
+          const points = state.data.points.filter((point) => point.equipmentId === item.id);
+          return `
+            <button class="equipment-card ${item.id === state.selectedEquipmentId ? "active" : ""}" data-equipment-card="${item.id}">
+              <div class="equipment-card-head">
+                <span>
+                  <strong>${escapeHtml(item.name)}</strong>
+                  <small>${escapeHtml(item.type)} / ${escapeHtml(item.team)}</small>
+                </span>
+                <em class="badge ${item.status}">${statusLabel(item.status)}</em>
+              </div>
+              <div class="equipment-metrics">
+                ${miniMetric(t("items"), records.length)}
+                ${miniMetric(t("pointCount"), points.length)}
+                ${miniMetric(t("completion"), `${stats.completion}%`)}
+              </div>
+              <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
+              <small>${stats.passed} ${t("passed")} / ${stats.failed} ${t("failed")} / ${stats.pending} ${t("pending")}</small>
+            </button>
+          `;
+        })
+        .join("") || `<div class="empty small">${t("noEquipment")}</div>`}
+    </div>
+  `;
+}
+
+function renderFieldOperation() {
+  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  if (!equipment) return `<div class="empty">${t("noEquipment")}</div>`;
+  const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
+  const points = state.data.points.filter((point) => point.equipmentId === equipment.id);
+  const selectedRecord = records.find((record) => record.id === state.selectedRecordId) || records[0];
+  return `
+    <div class="field-operation">
+      <div class="form-head">
+        <div>
+          <p class="eyebrow">${t("selectedEquipment")}</p>
+          <h2>${escapeHtml(equipment.name)}</h2>
+        </div>
+        <span class="badge ${equipment.status}">${statusLabel(equipment.status)}</span>
+      </div>
+      ${renderQuickStats(records)}
+      <datalist id="comment-suggestions">${getCommentSuggestions().map((comment) => `<option value="${escapeHtml(comment)}"></option>`).join("")}</datalist>
+      <div class="point-action-list">
+        ${points.map((point) => renderPointActionRow(point)).join("")}
+      </div>
+      ${selectedRecord ? renderAttachmentDock(selectedRecord) : ""}
+    </div>
+  `;
+}
+
+function renderPointActionRow(point) {
+  const record = state.data.records.find((item) => item.pointId === point.id);
+  const isSelected = record?.id === state.selectedRecordId;
+  return `
+    <div class="point-action-row ${isSelected ? "active" : ""}">
+      <button class="point-main" data-point="${point.id}">
+        <strong>${escapeHtml(point.name)}</strong>
+        <span>${escapeHtml(point.type)} / ${t("reference")}: ${escapeHtml(point.reference || "-")}</span>
+      </button>
+      <span class="badge ${record?.status || point.status}">${statusLabel(record?.status || point.status)}</span>
+      <div class="quick-actions">
+        ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}">${result}</button>`).join("")}
+        <button class="ghost compact" data-comment-record="${record?.id || ""}">${t("addComment")}</button>
+      </div>
+      <div class="comment-panel ${isSelected ? "show" : ""}">
+        <textarea rows="2" list="comment-suggestions" data-comment-input="${record?.id || ""}" placeholder="${t("commentPlaceholder")}">${escapeHtml(record?.comments || "")}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function renderAttachmentDock(record) {
+  return `
+    <form class="attachment-dock" data-form="${record.id}">
+      <label class="file-button">${t("camera")}
+        <input name="camera" type="file" accept="image/*" capture="environment" multiple />
+      </label>
+      <label class="file-button">${t("gallery")}
+        <input name="attachments" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple />
+      </label>
+      <button type="button" class="ghost" data-action="translate">${t("translate")}</button>
+      <button class="primary" type="submit">${t("save")}</button>
+      <div class="photos">
+        ${(record.photos || []).map((photo) => `<img src="${photo.dataUrl || photo}" alt="${escapeHtml(photo.name || "Inspection photo")}" />`).join("")}
+      </div>
+    </form>
   `;
 }
 
@@ -530,13 +628,26 @@ function bindEvents() {
   document.querySelectorAll("[data-point]").forEach((button) => {
     button.addEventListener("click", () => selectPoint(button.dataset.point));
   });
+  document.querySelectorAll("[data-equipment-card]").forEach((button) => {
+    button.addEventListener("click", () => selectEquipment(button.dataset.equipmentCard));
+  });
   document.querySelectorAll("[data-record]").forEach((button) => {
     button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.record }));
+  });
+  document.querySelectorAll("[data-quick-result]").forEach((button) => {
+    button.addEventListener("click", () => updateRecordQuick(button.dataset.record, button.dataset.quickResult));
+  });
+  document.querySelectorAll("[data-comment-record]").forEach((button) => {
+    button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.commentRecord }));
+  });
+  document.querySelectorAll("[data-comment-input]").forEach((input) => {
+    input.addEventListener("change", () => updateRecordComment(input.dataset.commentInput, input.value));
   });
   document.querySelector("[data-action='sync']")?.addEventListener("click", () => syncRecords(true));
   document.querySelector("[data-action='translate']")?.addEventListener("click", translateComment);
   document.querySelector("[data-action='import-excel']")?.addEventListener("change", importExcel);
   document.querySelector(".inspection-form")?.addEventListener("submit", saveInspection);
+  document.querySelector(".attachment-dock")?.addEventListener("submit", saveInspection);
   document.querySelectorAll("[data-editor]").forEach((form) => {
     form.addEventListener("submit", saveAdminEditor);
   });
@@ -554,6 +665,12 @@ function selectPoint(pointId) {
   setState({ selectedPointId: pointId, selectedRecordId: record?.id || "" });
 }
 
+function selectEquipment(equipmentId) {
+  const point = state.data.points.find((item) => item.equipmentId === equipmentId);
+  const record = state.data.records.find((item) => item.equipmentId === equipmentId && item.pointId === point?.id);
+  setState({ selectedEquipmentId: equipmentId, selectedPointId: point?.id || "", selectedRecordId: record?.id || "" });
+}
+
 async function saveInspection(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -562,13 +679,13 @@ async function saveInspection(event) {
   const attachmentFiles = await filesToDataUrls(form.attachments.files);
   const records = state.data.records.map((record) => {
     if (record.id !== id) return record;
-    const result = form.result.value;
+    const result = form.result?.value || record.result || "Pending";
     const now = new Date();
     return {
       ...record,
-      title: form.title.value,
+      title: form.title?.value || record.title,
       result,
-      comments: form.comments.value,
+      comments: form.comments?.value || record.comments || "",
       photos: [...(record.photos || []), ...cameraFiles, ...attachmentFiles],
       status: statusFromResult(result),
       sync: "pending",
@@ -581,6 +698,34 @@ async function saveInspection(event) {
   setState({ data, toast: t("success") });
   window.setTimeout(() => setState({ toast: "" }), 2200);
   await syncRecords(false);
+}
+
+async function updateRecordQuick(recordId, result) {
+  updateRecord(recordId, { result, status: statusFromResult(result) });
+  await syncRecords(false);
+}
+
+async function updateRecordComment(recordId, comments) {
+  updateRecord(recordId, { comments });
+  await syncRecords(false);
+}
+
+function updateRecord(recordId, patch) {
+  const now = new Date();
+  const records = state.data.records.map((record) => {
+    if (record.id !== recordId) return record;
+    return {
+      ...record,
+      ...patch,
+      sync: "pending",
+      localUpdatedAt: now.getTime(),
+      baseServerUpdatedAt: record.serverUpdatedAt,
+      updatedAt: now.toLocaleString("sv-SE")
+    };
+  });
+  const data = refreshLocalStatuses({ ...state.data, records });
+  setState({ data, selectedRecordId: recordId, toast: t("success") });
+  window.setTimeout(() => setState({ toast: "" }), 1600);
 }
 
 async function syncRecords(showToast) {
@@ -654,6 +799,14 @@ function getFilteredRecords() {
   return state.data.records.filter((record) => record.equipmentId === state.selectedEquipmentId);
 }
 
+function getVisibleEquipment() {
+  return state.data.equipment.filter((item) => item.locationId === state.selectedLocationId && item.team === state.selectedTeam);
+}
+
+function getCommentSuggestions() {
+  return [...new Set(state.data.records.map((record) => record.comments).filter(Boolean))].slice(0, 20);
+}
+
 function getStats(records = state.data.records) {
   const total = records.length;
   const passed = records.filter((record) => ["passed", "closed"].includes(record.status)).length;
@@ -678,6 +831,10 @@ function renderQuickStats(records) {
 
 function statCard(label, value) {
   return `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`;
+}
+
+function miniMetric(label, value) {
+  return `<span><strong>${value}</strong><small>${label}</small></span>`;
 }
 
 function statusLabel(status) {
