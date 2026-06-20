@@ -1183,10 +1183,8 @@ function renderDataTable() {
       <div class="${tableClasses.join(" ")}">
         <div class="excel-row excel-head">
           <span title="${t("project")}">${t("project")}</span>
-          <span title="${t("location")}">${t("location")}</span>
           <span title="${t("team")}">Team</span>
-          <span title="${t("equipmentName")}">Equipment</span>
-          <span title="${t("equipmentType")}">Equip Type</span>
+          <span title="${t("equipmentName")}">${t("equipmentName")} & Context</span>
           <span title="${t("pointName")}">Point Name</span>
           <span title="${t("pointType")}">Point Type</span>
           <span title="${t("reference")}">${t("reference")}</span>
@@ -1205,10 +1203,13 @@ function renderDataRow(row) {
   return `
     <form class="excel-row" data-row-editor data-record-id="${row.record.id}" data-equipment-id="${row.equipment.id}" data-point-id="${row.point.id}">
       <select name="projectId" title="${escapeHtml(getProjectName(row.equipment.projectId))}">${state.data.projects.map((project) => option(project.id, project.name, row.equipment.projectId)).join("")}</select>
-      <select name="locationId" title="${escapeHtml(getLocationName(row.equipment.locationId))}">${state.data.locations.map((location) => option(location.id, getCompactLocationName(location.id), row.equipment.locationId)).join("")}</select>
       <input name="team" value="${escapeHtml(row.equipment.team)}" title="${escapeHtml(row.equipment.team)}" />
-      <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" title="${escapeHtml(row.equipment.name)}" />
-      <input name="equipmentType" value="${escapeHtml(row.equipment.type)}" title="${escapeHtml(row.equipment.type)}" />
+      <div class="equipment-context-cell" title="${escapeHtml(`${row.equipment.name} / ${row.equipment.type} / ${getLocationName(row.equipment.locationId)}`)}">
+        <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" />
+        <input name="equipmentType" type="hidden" value="${escapeHtml(row.equipment.type)}" />
+        <input name="locationId" type="hidden" value="${escapeHtml(row.equipment.locationId)}" />
+        <span>${escapeHtml(row.equipment.type)} &middot; ${escapeHtml(getCompactLocationName(row.equipment.locationId))}</span>
+      </div>
       <input name="pointName" value="${escapeHtml(row.point.name)}" title="${escapeHtml(row.point.name)}" />
       <input name="pointType" value="${escapeHtml(row.point.type)}" title="${escapeHtml(row.point.type)}" />
       <input name="reference" value="${escapeHtml(row.point.reference || "")}" title="${escapeHtml(row.point.reference || "")}" />

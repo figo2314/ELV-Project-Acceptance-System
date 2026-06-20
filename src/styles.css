@@ -1592,29 +1592,29 @@ button.kpi-card.active {
 }
 
 .excel-table {
-  min-width: 1180px;
+  min-width: 1040px;
 }
 
 .excel-row {
   display: grid;
   gap: 0;
-  grid-template-columns: 140px 130px 76px 150px 120px minmax(260px, 1.35fr) 112px minmax(210px, 1fr) 96px 94px 104px 72px;
+  grid-template-columns: 140px 76px minmax(280px, 1.25fr) minmax(320px, 1.55fr) 112px minmax(210px, 0.95fr) 96px 94px 104px 72px;
 }
 
 .excel-table.hide-project {
-  min-width: 1060px;
+  min-width: 900px;
 }
 
 .excel-table.hide-project .excel-row {
-  grid-template-columns: 0 124px 76px 150px 120px minmax(300px, 1.45fr) 112px minmax(230px, 1.05fr) 96px 94px 104px 72px;
+  grid-template-columns: 0 76px minmax(310px, 1.35fr) minmax(360px, 1.65fr) 112px minmax(230px, 1fr) 96px 94px 104px 72px;
 }
 
 .excel-table.compact-location .excel-row {
-  grid-template-columns: 140px 118px 76px 150px 120px minmax(285px, 1.4fr) 112px minmax(225px, 1fr) 96px 94px 104px 72px;
+  grid-template-columns: 140px 76px minmax(300px, 1.3fr) minmax(340px, 1.6fr) 112px minmax(220px, 1fr) 96px 94px 104px 72px;
 }
 
 .excel-table.hide-project.compact-location .excel-row {
-  grid-template-columns: 0 110px 76px 150px 120px minmax(320px, 1.5fr) 112px minmax(245px, 1.08fr) 96px 94px 104px 72px;
+  grid-template-columns: 0 76px minmax(340px, 1.42fr) minmax(390px, 1.72fr) 112px minmax(240px, 1.04fr) 96px 94px 104px 72px;
 }
 
 .excel-table.hide-project .excel-row > :first-child {
@@ -1629,6 +1629,7 @@ button.kpi-card.active {
 .excel-row > span,
 .excel-row > input,
 .excel-row > select,
+.excel-row > div,
 .excel-row > button {
   border: 0;
   border-bottom: 1px solid #e6eeec;
@@ -1649,7 +1650,8 @@ button.kpi-card.active {
 }
 
 .excel-row:not(.excel-head):hover > input,
-.excel-row:not(.excel-head):hover > select {
+.excel-row:not(.excel-head):hover > select,
+.excel-row:not(.excel-head):hover > div {
   background: #f8fbfa;
 }
 
@@ -1657,29 +1659,80 @@ button.kpi-card.active {
   cursor: pointer;
 }
 
-.excel-row > :nth-child(6) {
+.equipment-context-cell {
+  align-items: flex-start;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  overflow: visible;
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+
+.equipment-context-cell input[name="equipmentName"] {
+  background: transparent;
+  border: 0;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.2;
+  min-height: 0;
+  outline: 0;
+  overflow: visible;
+  padding: 0;
+  text-overflow: clip;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.equipment-context-cell input[name="equipmentName"]:focus {
+  box-shadow: inset 0 -2px 0 #2563eb;
+}
+
+.equipment-context-cell span {
+  color: #64748b;
+  display: block;
+  font-size: 11px;
+  line-height: 1.2;
+  max-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.excel-row > input[name="pointName"] {
+  color: #1e293b;
+  font-weight: 650;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.excel-row > :nth-child(4) {
   box-shadow: 6px 0 12px rgb(31 51 58 / 7%);
   left: 0;
   position: sticky;
   z-index: 2;
 }
 
-.excel-row > :nth-child(11) {
+.excel-row > :nth-child(9) {
   box-shadow: -6px 0 12px rgb(31 51 58 / 7%);
   position: sticky;
   right: 72px;
   z-index: 3;
 }
 
-.excel-row > :nth-child(12) {
+.excel-row > :nth-child(10) {
   position: sticky;
   right: 0;
   z-index: 4;
 }
 
-.excel-head > :nth-child(6),
-.excel-head > :nth-child(11),
-.excel-head > :nth-child(12) {
+.excel-head > :nth-child(4),
+.excel-head > :nth-child(9),
+.excel-head > :nth-child(10) {
   z-index: 6;
 }
 
