@@ -134,7 +134,8 @@ const dictionary = {
     allNodes: "All",
     building: "Building",
     floor: "Floor",
-    room: "Room"
+    room: "Room",
+    back: "Back"
   },
   zh: {
     appName: "ELV 項目驗收",
@@ -262,7 +263,8 @@ const dictionary = {
     allNodes: "全部",
     building: "樓棟",
     floor: "樓層",
-    room: "機房"
+    room: "機房",
+    back: "返回"
   }
 };
 const fallbackData = {
@@ -315,6 +317,8 @@ function defaultState() {
     selectedEquipmentId: "e1",
     selectedPointId: "pt1",
     selectedRecordId: "r1",
+    fieldMobileLevel: "project",
+    fieldMobilePath: {},
     toast: "",
     conflicts: [],
     adminProjectId: "p1",
@@ -414,17 +418,196 @@ function renderTopbar() {
 }
 
 function renderField() {
+  const isMobileDetail = state.fieldMobileLevel === "detail";
   return `
-    <section class="field-grid">
+    <section class="field-grid ${isMobileDetail ? "mobile-detail-open" : ""}">
       <aside class="panel stack field-sidebar">
-        ${renderSelectors()}
-        ${renderEquipmentCards()}
+        <div class="field-desktop-tree">
+          ${renderFieldTree()}
+        </div>
+        <div class="field-mobile-drill">
+          ${renderFieldMobileDrill()}
+        </div>
       </aside>
       <section class="panel detail field-detail">
         ${renderFieldOperation()}
       </section>
     </section>
   `;
+}
+
+function renderFieldTree() {
+  return `
+    <div class="section-title">${t("treeView")}</div>
+    <div class="tree-view field-tree-view">
+      ${state.data.projects.map((project) => renderFieldProjectBranch(project)).join("")}
+    </div>
+  `;
+}
+
+function renderFieldProjectBranch(project) {
+  const tree = buildLocationTree(project.id);
+  const equipmentCount = state.data.equipment.filter((item) => item.projectId === project.id).length;
+  const projectNode = { type: "project", projectId: project.id, label: project.name, count: equipmentCount };
+  return `${renderFieldTreeNode(projectNode, 0)}${[...tree.values()].map((building) => renderFieldTreeBranch(building, 1)).join("")}`;
+}
+
+function renderFieldTreeBranch(node, level) {
+  const children = node.children ? [...node.children.values()].map((child) => renderFieldTreeBranch(child, level + 1)).join("") : "";
+  const equipment = node.equipment ? node.equipment.map((item) => renderFieldTreeEquipment(item, level + 1)).join("") : "";
+  return `${renderFieldTreeNode(node, level)}${children}${equipment}`;
+}
+
+function renderFieldTreeEquipment(item, level) {
+  const records = state.data.records.filter((record) => record.equipmentId === item.id);
+  const stats = getStats(records);
+  const node = {
+    type: "equipment",
+    projectId: item.projectId,
+    locationId: item.locationId,
+    equipmentId: item.id,
+    label: item.name,
+    meta: `${item.type} / ${stats.completion}%`
+  };
+  return renderFieldTreeNode(node, level, item.status);
+}
+
+function renderFieldTreeNode(node, level, status = "") {
+  const active = isFieldTreeActive(node);
+  const path = isFieldTreePath(node);
+  const meta = node.meta || `${node.type}${node.count !== undefined ? ` / ${node.count}` : ""}`;
+  return `
+    <button class="tree-node field-tree-node ${active ? "active" : ""} ${path ? "path" : ""}" style="--level:${level}" data-field-tree-node="${encodeTreeNode(node)}">
+      <span>${escapeHtml(node.label)}</span>
+      <small class="${status}">${escapeHtml(meta)}</small>
+    </button>
+  `;
+}
+
+function renderFieldMobileDrill() {
+  const level = state.fieldMobileLevel || "project";
+  const path = state.fieldMobilePath || {};
+  if (level === "detail") return renderFieldMobileDetailNav();
+
+  const options = getFieldMobileOptions(level, path);
+  return `
+    <div class="mobile-drill-head">
+      <div>
+        <p class="eyebrow">${t("field")}</p>
+        <div class="section-title">${getFieldMobileTitle(level)}</div>
+      </div>
+      ${level === "project" ? "" : `<button class="ghost compact" data-field-mobile-back>${t("back")}</button>`}
+    </div>
+    <div class="mobile-drill-list">
+      ${options.map((item) => renderFieldMobileChoice(item)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
+    </div>
+  `;
+}
+
+function renderFieldMobileDetailNav() {
+  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  return `
+    <div class="mobile-drill-head">
+      <div>
+        <p class="eyebrow">${t("selectedEquipment")}</p>
+        <div class="section-title">${escapeHtml(equipment?.name || t("equipment"))}</div>
+      </div>
+      <button class="ghost compact" data-field-mobile-back>${t("back")}</button>
+    </div>
+    <div class="mobile-path-summary">
+      <span>${escapeHtml(getProjectName(state.selectedProjectId))}</span>
+      <span>${escapeHtml(getLocationName(state.selectedLocationId))}</span>
+      <span>${escapeHtml(state.selectedTeam || "")}</span>
+    </div>
+  `;
+}
+
+function renderFieldMobileChoice(item) {
+  return `
+    <button class="mobile-drill-choice" data-field-mobile-choice="${encodeURIComponent(JSON.stringify(item.payload))}">
+      <span>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.meta || "")}</small>
+      </span>
+      <em>${item.action || ">"}</em>
+    </button>
+  `;
+}
+
+function getFieldMobileTitle(level) {
+  const labels = {
+    project: t("project"),
+    building: t("building"),
+    floor: t("floor"),
+    room: t("room"),
+    team: t("team"),
+    equipment: t("equipment")
+  };
+  return labels[level] || t("equipment");
+}
+
+function getFieldMobileOptions(level, path) {
+  if (level === "project") {
+    return state.data.projects.map((project) => ({
+      label: project.name,
+      meta: `${state.data.equipment.filter((item) => item.projectId === project.id).length} ${t("equipment")}`,
+      payload: { level, projectId: project.id }
+    }));
+  }
+
+  const projectId = path.projectId || state.selectedProjectId;
+  const tree = buildLocationTree(projectId);
+  if (level === "building") {
+    return [...tree.values()].map((building) => ({
+      label: building.label,
+      meta: t("building"),
+      payload: { level, projectId, building: building.building }
+    }));
+  }
+
+  const building = tree.get(path.building);
+  if (level === "floor") {
+    return [...(building?.children?.values() || [])].map((floor) => ({
+      label: floor.label,
+      meta: t("floor"),
+      payload: { level, projectId, building: path.building, floor: floor.floor }
+    }));
+  }
+
+  const floor = building?.children?.get(path.floor);
+  if (level === "room") {
+    return [...(floor?.children?.values() || [])].map((room) => ({
+      label: room.label,
+      meta: t("room"),
+      payload: { level, projectId, building: path.building, floor: path.floor, room: room.room, locationId: room.locationId }
+    }));
+  }
+
+  const locationEquipment = state.data.equipment.filter((item) => item.locationId === path.locationId);
+  if (level === "team") {
+    return [...new Set(locationEquipment.map((item) => item.team))].map((team) => ({
+      label: team,
+      meta: `${locationEquipment.filter((item) => item.team === team).length} ${t("equipment")}`,
+      payload: { level, projectId, building: path.building, floor: path.floor, room: path.room, locationId: path.locationId, team }
+    }));
+  }
+
+  if (level === "equipment") {
+    return locationEquipment
+      .filter((item) => item.team === path.team)
+      .map((item) => {
+        const records = state.data.records.filter((record) => record.equipmentId === item.id);
+        const stats = getStats(records);
+        return {
+          label: item.name,
+          meta: `${item.type} / ${stats.completion}% ${t("completion")}`,
+          action: statusLabel(item.status),
+          payload: { level, equipmentId: item.id }
+        };
+      });
+  }
+
+  return [];
 }
 
 function renderSelectors() {
@@ -949,18 +1132,26 @@ function renderTreeBranch(node, level) {
 
 function renderTreeNode(node, level) {
   const selected = isTreeSelected(node);
+  const stats = getTreeNodeStats(node);
+  const tone = getTreeNodeTone(stats);
   return `
     <button class="tree-node ${selected ? "active" : ""}" style="--level:${level}" data-tree-node="${encodeTreeNode(node)}">
       <span>${escapeHtml(node.label)}</span>
-      <small>${escapeHtml(node.type)}</small>
+      <span class="tree-meta" title="${stats.failed + stats.rectification} ${t("issueQty")} / ${stats.pending} ${t("pending")}">
+        <i class="tree-status-dot ${tone}"></i>
+        <small>${stats.passed}/${stats.total}</small>
+      </span>
     </button>
   `;
 }
 
 function renderDataTable() {
+  const tableClasses = ["excel-table"];
+  if (isAdminProjectFixed()) tableClasses.push("hide-project");
+  if (state.adminTreeSelection || state.adminProjectId) tableClasses.push("compact-location");
   return `
     <div class="excel-table-wrap">
-      <div class="excel-table">
+      <div class="${tableClasses.join(" ")}">
         <div class="excel-row excel-head">
           <span>${t("project")}</span>
           <span>${t("location")}</span>
@@ -985,7 +1176,7 @@ function renderDataRow(row) {
   return `
     <form class="excel-row" data-row-editor data-record-id="${row.record.id}" data-equipment-id="${row.equipment.id}" data-point-id="${row.point.id}">
       <select name="projectId" title="${escapeHtml(getProjectName(row.equipment.projectId))}">${state.data.projects.map((project) => option(project.id, project.name, row.equipment.projectId)).join("")}</select>
-      <select name="locationId" title="${escapeHtml(getLocationName(row.equipment.locationId))}">${state.data.locations.map((location) => option(location.id, location.name, row.equipment.locationId)).join("")}</select>
+      <select name="locationId" title="${escapeHtml(getLocationName(row.equipment.locationId))}">${state.data.locations.map((location) => option(location.id, getCompactLocationName(location.id), row.equipment.locationId)).join("")}</select>
       <input name="team" value="${escapeHtml(row.equipment.team)}" title="${escapeHtml(row.equipment.team)}" />
       <input name="equipmentName" value="${escapeHtml(row.equipment.name)}" title="${escapeHtml(row.equipment.name)}" />
       <input name="equipmentType" value="${escapeHtml(row.equipment.type)}" title="${escapeHtml(row.equipment.type)}" />
@@ -994,7 +1185,7 @@ function renderDataRow(row) {
       <input name="reference" value="${escapeHtml(row.point.reference || "")}" title="${escapeHtml(row.point.reference || "")}" />
       <input name="assignee" value="${escapeHtml(row.record.assignee || "")}" title="${escapeHtml(row.record.assignee || "")}" />
       <input name="due" value="${escapeHtml(row.record.due || "")}" title="${escapeHtml(row.record.due || "")}" />
-      <select name="status" title="${statusLabel(row.record.status)}">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
+      <select class="status-select ${row.record.status}" name="status" title="${statusLabel(row.record.status)}">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
       <button class="ghost" type="submit">${t("saveChanges")}</button>
     </form>
   `;
@@ -1194,7 +1385,16 @@ function bindEvents() {
     button.addEventListener("click", () => setAdminPage(button.dataset.adminPage));
   });
   document.querySelectorAll("[data-tree-node]").forEach((button) => {
-    button.addEventListener("click", () => setState({ adminTreeSelection: JSON.parse(decodeURIComponent(button.dataset.treeNode)) }));
+    button.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(button.dataset.treeNode))));
+  });
+  document.querySelectorAll("[data-field-tree-node]").forEach((button) => {
+    button.addEventListener("click", () => selectFieldTreeNode(JSON.parse(decodeURIComponent(button.dataset.fieldTreeNode))));
+  });
+  document.querySelectorAll("[data-field-mobile-choice]").forEach((button) => {
+    button.addEventListener("click", () => selectFieldMobileChoice(JSON.parse(decodeURIComponent(button.dataset.fieldMobileChoice))));
+  });
+  document.querySelectorAll("[data-field-mobile-back]").forEach((button) => {
+    button.addEventListener("click", goFieldMobileBack);
   });
   document.querySelectorAll("[data-dashboard-filter]").forEach((button) => {
     button.addEventListener("click", () => setDashboardFilter(button.dataset.dashboardFilter));
@@ -1253,6 +1453,9 @@ function bindEvents() {
   document.querySelectorAll("[data-row-editor]").forEach((form) => {
     form.addEventListener("submit", saveDataRow);
   });
+  document.querySelectorAll(".status-select").forEach((select) => {
+    select.addEventListener("change", () => setStatusSelectTone(select));
+  });
   document.querySelectorAll("[data-field-point-editor]").forEach((form) => {
     form.addEventListener("submit", saveFieldPoint);
   });
@@ -1282,6 +1485,85 @@ function selectEquipment(equipmentId) {
   setState({ selectedEquipmentId: equipmentId, selectedPointId: point?.id || "", selectedRecordId: record?.id || "" });
 }
 
+function selectFieldTreeNode(node) {
+  const equipment = getFirstEquipmentForFieldNode(node);
+  if (!equipment) {
+    setState({ selectedProjectId: node.projectId || state.selectedProjectId });
+    return;
+  }
+  const point = state.data.points.find((item) => item.equipmentId === equipment.id);
+  const record = state.data.records.find((item) => item.equipmentId === equipment.id && item.pointId === point?.id);
+  setState({
+    selectedProjectId: equipment.projectId,
+    selectedLocationId: equipment.locationId,
+    selectedTeam: equipment.team,
+    selectedEquipmentId: equipment.id,
+    selectedPointId: point?.id || "",
+    selectedRecordId: record?.id || "",
+    fieldMobileLevel: "detail",
+    fieldMobilePath: getFieldMobilePathForEquipment(equipment)
+  });
+}
+
+function selectFieldMobileChoice(payload) {
+  const currentPath = state.fieldMobilePath || {};
+  if (payload.level === "equipment") {
+    selectFieldTreeNode({ type: "equipment", equipmentId: payload.equipmentId });
+    return;
+  }
+
+  const levelOrder = ["project", "building", "floor", "room", "team", "equipment"];
+  const nextLevel = levelOrder[levelOrder.indexOf(payload.level) + 1] || "equipment";
+  setState({
+    selectedProjectId: payload.projectId || state.selectedProjectId,
+    selectedLocationId: payload.locationId || state.selectedLocationId,
+    selectedTeam: payload.team || state.selectedTeam,
+    fieldMobileLevel: nextLevel,
+    fieldMobilePath: { ...currentPath, ...payload }
+  });
+}
+
+function goFieldMobileBack() {
+  const level = state.fieldMobileLevel || "project";
+  const path = { ...(state.fieldMobilePath || {}) };
+  if (level === "detail") {
+    setState({ fieldMobileLevel: "equipment" });
+    return;
+  }
+  if (level === "equipment") {
+    delete path.team;
+    setState({ fieldMobileLevel: "team", fieldMobilePath: path });
+    return;
+  }
+  if (level === "team") {
+    delete path.locationId;
+    delete path.room;
+    setState({ fieldMobileLevel: "room", fieldMobilePath: path });
+    return;
+  }
+  if (level === "room") {
+    delete path.floor;
+    setState({ fieldMobileLevel: "floor", fieldMobilePath: path });
+    return;
+  }
+  if (level === "floor") {
+    delete path.building;
+    setState({ fieldMobileLevel: "building", fieldMobilePath: path });
+    return;
+  }
+  setState({ fieldMobileLevel: "project", fieldMobilePath: {} });
+}
+
+function selectAdminTreeNode(node) {
+  const patch = {
+    adminTreeSelection: node,
+    adminProjectId: node.projectId || state.adminProjectId || state.selectedProjectId,
+    adminSearchDraft: state.adminSearch || ""
+  };
+  patch.adminEquipmentId = node.type === "equipment" ? node.equipmentId : "";
+  setState(patch);
+}
+
 function updateAdminFilter(field) {
   const patch = {};
   if (field.dataset.adminFilter === "project") {
@@ -1301,6 +1583,11 @@ function updateAdminSearch(value) {
   adminSearchTimer = window.setTimeout(() => {
     setState({ adminSearch: value, adminSearchDraft: value });
   }, 350);
+}
+
+function setStatusSelectTone(select) {
+  select.classList.remove("pending", "passed", "failed", "rectification", "closed");
+  select.classList.add(select.value || "pending");
 }
 
 async function saveInspection(event) {
@@ -1532,6 +1819,50 @@ function getVisibleEquipment() {
   return state.data.equipment.filter((item) => item.locationId === state.selectedLocationId && item.team === state.selectedTeam);
 }
 
+function getFirstEquipmentForFieldNode(node) {
+  if (node.type === "equipment") return state.data.equipment.find((item) => item.id === node.equipmentId);
+  const projectId = node.projectId || state.selectedProjectId;
+  return state.data.equipment.find((item) => {
+    if (item.projectId !== projectId) return false;
+    const location = state.data.locations.find((candidate) => candidate.id === item.locationId);
+    const parts = parseLocationParts(location?.name || "");
+    if (node.type === "building") return parts.building === node.building;
+    if (node.type === "floor") return parts.building === node.building && parts.floor === node.floor;
+    if (node.type === "room") return item.locationId === node.locationId;
+    return true;
+  });
+}
+
+function getFieldMobilePathForEquipment(equipment) {
+  const location = state.data.locations.find((item) => item.id === equipment.locationId);
+  const parts = parseLocationParts(location?.name || "");
+  return {
+    projectId: equipment.projectId,
+    building: parts.building,
+    floor: parts.floor,
+    room: parts.room,
+    locationId: equipment.locationId,
+    team: equipment.team
+  };
+}
+
+function isFieldTreeActive(node) {
+  return node.type === "equipment" && node.equipmentId === state.selectedEquipmentId;
+}
+
+function isFieldTreePath(node) {
+  if (node.type === "equipment") return node.equipmentId === state.selectedEquipmentId;
+  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  if (!equipment) return node.type === "project" && node.projectId === state.selectedProjectId;
+  const location = state.data.locations.find((item) => item.id === equipment.locationId);
+  const parts = parseLocationParts(location?.name || "");
+  if (node.type === "project") return node.projectId === equipment.projectId;
+  if (node.type === "building") return node.projectId === equipment.projectId && node.building === parts.building;
+  if (node.type === "floor") return node.projectId === equipment.projectId && node.building === parts.building && node.floor === parts.floor;
+  if (node.type === "room") return node.locationId === equipment.locationId;
+  return false;
+}
+
 function getAdminFilteredEquipmentOptions() {
   const projectId = state.adminProjectId || state.selectedProjectId;
   return state.data.equipment.filter((item) => item.projectId === projectId);
@@ -1543,6 +1874,25 @@ function getProjectName(projectId) {
 
 function getLocationName(locationId) {
   return state.data.locations.find((item) => item.id === locationId)?.name || "";
+}
+
+function isAdminProjectFixed() {
+  return Boolean(state.adminProjectId || state.adminTreeSelection?.projectId);
+}
+
+function getCompactLocationName(locationId) {
+  const name = getLocationName(locationId);
+  const selected = state.adminTreeSelection;
+  if (!selected || selected.type === "project" || selected.type === "equipment") {
+    const parts = parseLocationParts(name);
+    return [parts.floor, parts.room].filter(Boolean).join(" / ") || name;
+  }
+
+  const parts = parseLocationParts(name);
+  if (selected.type === "building" && parts.building === selected.building) return [parts.floor, parts.room].filter(Boolean).join(" / ") || name;
+  if (selected.type === "floor" && parts.building === selected.building && parts.floor === selected.floor) return parts.room || name;
+  if (selected.type === "room" && locationId === selected.locationId) return selected.room || parts.room || name;
+  return name;
 }
 
 function buildLocationTree(projectId) {
@@ -1582,6 +1932,34 @@ function isTreeSelected(node) {
   const selected = state.adminTreeSelection;
   if (!selected) return node.type === "project";
   return encodeTreeNode(selected) === encodeTreeNode(node);
+}
+
+function getTreeNodeStats(node) {
+  const equipmentIds = new Set(getEquipmentForTreeNode(node).map((item) => item.id));
+  const records = state.data.records.filter((record) => equipmentIds.has(record.equipmentId));
+  return getStats(records);
+}
+
+function getEquipmentForTreeNode(node) {
+  const projectId = node.projectId || state.adminProjectId || state.selectedProjectId;
+  return state.data.equipment.filter((item) => {
+    if (item.projectId !== projectId) return false;
+    if (node.type === "project") return true;
+    if (node.type === "equipment") return item.id === node.equipmentId;
+    const location = state.data.locations.find((candidate) => candidate.id === item.locationId);
+    const parts = parseLocationParts(location?.name || "");
+    if (node.type === "building") return parts.building === node.building;
+    if (node.type === "floor") return parts.building === node.building && parts.floor === node.floor;
+    if (node.type === "room") return item.locationId === node.locationId;
+    return true;
+  });
+}
+
+function getTreeNodeTone(stats) {
+  if (!stats.total) return "empty";
+  if (stats.failed || stats.rectification) return "risk";
+  if (stats.pending) return "pending";
+  return "complete";
 }
 
 function getAdminRows() {

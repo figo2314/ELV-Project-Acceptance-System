@@ -149,7 +149,7 @@ button {
   display: grid;
   gap: 16px;
   margin: 0 auto;
-  max-width: 1180px;
+  max-width: 1440px;
 }
 
 .mobile-grid {
@@ -161,7 +161,8 @@ button {
 }
 
 .field-grid {
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  align-items: start;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
 }
 
 .admin-workspace {
@@ -545,6 +546,103 @@ textarea {
 .field-operation {
   display: grid;
   gap: 12px;
+}
+
+.field-sidebar {
+  max-height: calc(100vh - 132px);
+  overflow: auto;
+  position: sticky;
+  top: 16px;
+}
+
+.field-mobile-drill {
+  display: none;
+}
+
+.field-tree-view {
+  gap: 3px;
+}
+
+.field-tree-node {
+  min-height: 38px;
+}
+
+.field-tree-node.path:not(.active) {
+  background: #edf4f2;
+  color: #23404c;
+}
+
+.field-tree-node.active {
+  box-shadow: inset 4px 0 0 var(--lime);
+}
+
+.field-tree-node small {
+  border-radius: 999px;
+  padding: 4px 7px;
+}
+
+.mobile-drill-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.mobile-drill-head .section-title {
+  margin-bottom: 0;
+}
+
+.mobile-drill-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mobile-drill-choice {
+  align-items: center;
+  background: #fbfdfc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.mobile-drill-choice:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-drill-choice strong,
+.mobile-drill-choice small {
+  display: block;
+}
+
+.mobile-drill-choice small {
+  color: var(--muted);
+}
+
+.mobile-drill-choice em {
+  color: var(--brand);
+  font-style: normal;
+  font-weight: 850;
+}
+
+.mobile-path-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.mobile-path-summary span {
+  background: var(--panel-soft);
+  border: 1px solid #e6eeec;
+  border-radius: 8px;
+  color: #43545b;
+  padding: 8px 10px;
 }
 
 .equipment-card {
@@ -1291,6 +1389,7 @@ button.kpi-card.active {
   min-height: 34px;
   padding: 0 8px 0 calc(8px + var(--level) * 16px);
   text-align: left;
+  width: 100%;
 }
 
 .tree-node:hover {
@@ -1311,6 +1410,48 @@ button.kpi-card.active {
   color: #d9f99d;
 }
 
+.tree-node > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-meta {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.tree-status-dot {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 70%);
+  display: inline-block;
+  height: 9px;
+  width: 9px;
+}
+
+.tree-status-dot.empty {
+  background: #9aa9ae;
+}
+
+.tree-status-dot.pending {
+  background: #d59a19;
+}
+
+.tree-status-dot.risk {
+  background: var(--danger);
+}
+
+.tree-status-dot.complete {
+  background: var(--success);
+}
+
+.tree-node.active .tree-status-dot {
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 90%);
+}
+
 .excel-table-wrap {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1319,13 +1460,38 @@ button.kpi-card.active {
 }
 
 .excel-table {
-  min-width: 1500px;
+  min-width: 1420px;
 }
 
 .excel-row {
   display: grid;
   gap: 0;
-  grid-template-columns: 170px 210px 96px 190px 140px 220px 130px 170px 120px 110px 125px 90px;
+  grid-template-columns: 160px 170px 88px 180px 128px 260px 120px 220px 110px 104px 120px 86px;
+}
+
+.excel-table.hide-project {
+  min-width: 1240px;
+}
+
+.excel-table.hide-project .excel-row {
+  grid-template-columns: 0 150px 88px 180px 128px 300px 120px 250px 110px 104px 120px 86px;
+}
+
+.excel-table.compact-location .excel-row {
+  grid-template-columns: 160px 145px 88px 180px 128px 285px 120px 245px 110px 104px 120px 86px;
+}
+
+.excel-table.hide-project.compact-location .excel-row {
+  grid-template-columns: 0 132px 88px 180px 128px 320px 120px 270px 110px 104px 120px 86px;
+}
+
+.excel-table.hide-project .excel-row > :first-child {
+  border: 0;
+  min-width: 0;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  width: 0;
 }
 
 .excel-row > span,
@@ -1356,6 +1522,75 @@ button.kpi-card.active {
 
 .excel-row > select {
   cursor: pointer;
+}
+
+.excel-row > :nth-child(6) {
+  box-shadow: 6px 0 12px rgb(31 51 58 / 7%);
+  left: 0;
+  position: sticky;
+  z-index: 2;
+}
+
+.excel-row > :nth-child(11) {
+  box-shadow: -6px 0 12px rgb(31 51 58 / 7%);
+  position: sticky;
+  right: 86px;
+  z-index: 3;
+}
+
+.excel-row > :nth-child(12) {
+  position: sticky;
+  right: 0;
+  z-index: 4;
+}
+
+.excel-head > :nth-child(6),
+.excel-head > :nth-child(11),
+.excel-head > :nth-child(12) {
+  z-index: 6;
+}
+
+.status-select {
+  background-color: #fff7df;
+  color: #7b4b00;
+  font-weight: 850;
+}
+
+.status-select.passed,
+.status-select.closed {
+  background-color: #16864b;
+  color: #fff;
+}
+
+.status-select.failed {
+  background-color: #b93a2f;
+  color: #fff;
+}
+
+.status-select.rectification {
+  background-color: #f59e0b;
+  color: #3b2600;
+}
+
+.excel-row:not(.excel-head):hover > .status-select.passed,
+.excel-row:not(.excel-head):hover > .status-select.closed {
+  background-color: #16864b;
+  color: #fff;
+}
+
+.excel-row:not(.excel-head):hover > .status-select.failed {
+  background-color: #b93a2f;
+  color: #fff;
+}
+
+.excel-row:not(.excel-head):hover > .status-select.rectification {
+  background-color: #f59e0b;
+  color: #3b2600;
+}
+
+.excel-row:not(.excel-head):hover > .status-select.pending {
+  background-color: #fff7df;
+  color: #7b4b00;
 }
 
 .excel-row > span {
@@ -1477,6 +1712,28 @@ button.kpi-card.active {
   .tree-panel {
     max-height: none;
     position: static;
+  }
+
+  .field-sidebar {
+    max-height: none;
+    position: static;
+  }
+
+  .field-desktop-tree {
+    display: none;
+  }
+
+  .field-mobile-drill {
+    display: grid;
+    gap: 12px;
+  }
+
+  .field-grid:not(.mobile-detail-open) .field-detail {
+    display: none;
+  }
+
+  .field-grid.mobile-detail-open .field-sidebar {
+    order: -1;
   }
 
   .hero-kpis {
