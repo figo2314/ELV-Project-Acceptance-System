@@ -1142,17 +1142,17 @@ function renderDataTable() {
     <div class="excel-table-wrap">
       <div class="${tableClasses.join(" ")}">
         <div class="excel-row excel-head">
-          <span>${t("project")}</span>
-          <span>${t("location")}</span>
-          <span>${t("team")}</span>
-          <span>${t("equipmentName")}</span>
-          <span>${t("equipmentType")}</span>
-          <span>${t("pointName")}</span>
-          <span>${t("pointType")}</span>
-          <span>${t("reference")}</span>
-          <span>${t("assignee")}</span>
-          <span>${t("due")}</span>
-          <span>${t("status")}</span>
+          <span title="${t("project")}">${t("project")}</span>
+          <span title="${t("location")}">${t("location")}</span>
+          <span title="${t("team")}">Team</span>
+          <span title="${t("equipmentName")}">Equipment</span>
+          <span title="${t("equipmentType")}">Equip Type</span>
+          <span title="${t("pointName")}">Point Name</span>
+          <span title="${t("pointType")}">Point Type</span>
+          <span title="${t("reference")}">${t("reference")}</span>
+          <span title="${t("assignee")}">${t("assignee")}</span>
+          <span title="${t("due")}">${t("due")}</span>
+          <span title="${t("status")}">${t("status")}</span>
           <span></span>
         </div>
         ${getAdminRows().map(renderDataRow).join("")}
