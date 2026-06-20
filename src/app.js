@@ -329,6 +329,7 @@ function defaultState() {
     adminPage: "dashboard",
     adminTreeSelection: null,
     collapsedTreeNodes: [],
+    adminTreeWidth: 300,
     dashboardFilter: "all",
     selectedIssueId: "",
     importPreview: null,
@@ -876,15 +877,17 @@ function renderAdminNavItem(page, label) {
 function renderAdminPage() {
   if (state.adminPage === "data") {
     return `
-      <section class="data-workbench">
+      <section class="data-workbench" style="--tree-width:${Number(state.adminTreeWidth) || 300}px">
         <aside class="panel tree-panel">
           <div class="section-title">${t("treeView")}</div>
           ${renderLocationTree()}
+          <span class="tree-resize-handle" data-tree-resize title="Resize tree"></span>
         </aside>
         <section class="data-stack">
           ${renderProjectSelectorCard()}
           <section class="panel data-panel">
             <div class="section-title">${t("dataTable")}</div>
+            ${renderAdminContextBar()}
             ${renderAdminFilters()}
             ${renderDataTable()}
           </section>
@@ -1150,6 +1153,16 @@ function renderAdminFilters() {
   `;
 }
 
+function renderAdminContextBar() {
+  const segments = getAdminContextSegments();
+  return `
+    <div class="data-context-bar">
+      <span>Context</span>
+      <strong>${segments.map((segment) => escapeHtml(segment)).join(" / ")}</strong>
+    </div>
+  `;
+}
+
 function renderLocationTree() {
   const projectId = state.adminProjectId || state.selectedProjectId;
   const project = state.data.projects.find((item) => item.id === projectId);
@@ -1185,17 +1198,21 @@ function renderTreeNode(node, level, hasChildren = false, collapsed = false) {
   const selected = isTreeSelected(node);
   const stats = getTreeNodeStats(node);
   const tone = getTreeNodeTone(stats);
+  const subtitle = getTreeNodeSubtitle(node, stats);
   const encoded = encodeTreeNode(node);
   const levelClass = `tree-level-${Math.min(level, 4)}`;
   return `
-    <div class="tree-node ${levelClass} ${hasChildren ? "has-children" : ""} ${collapsed ? "collapsed" : ""} ${selected ? "active" : ""}" style="--level:${level}" role="button" tabindex="0" data-tree-node="${encoded}" ${hasChildren ? `aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
+    <div class="tree-node ${levelClass} ${hasChildren ? "has-children" : ""} ${subtitle ? "has-subtitle" : ""} ${collapsed ? "collapsed" : ""} ${selected ? "active" : ""}" style="--level:${level}" role="button" tabindex="0" data-tree-node="${encoded}" ${hasChildren ? `aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
       <span class="tree-label">
         ${
           hasChildren
             ? `<button class="tree-toggle" type="button" data-tree-toggle="${encoded}" aria-label="${collapsed ? "Expand" : "Collapse"}"><span class="tree-caret">▶</span></button>`
             : `<span class="tree-toggle-spacer"></span>`
         }
-        <span class="tree-title">${escapeHtml(node.label)}</span>
+        <span class="tree-text">
+          <span class="tree-title">${escapeHtml(node.label)}</span>
+          ${subtitle ? `<small class="tree-subtitle">${escapeHtml(subtitle)}</small>` : ""}
+        </span>
       </span>
       <span class="tree-meta" title="${stats.failed + stats.rectification} ${t("issueQty")} / ${stats.pending} ${t("pending")}">
         <i class="tree-status-dot tree-status-${tone}"></i>
@@ -1444,6 +1461,7 @@ function bindEvents() {
   document.querySelectorAll("[data-admin-project]").forEach((button) => {
     button.addEventListener("click", () => selectAdminProject(button.dataset.adminProject));
   });
+  document.querySelector("[data-tree-resize]")?.addEventListener("pointerdown", startTreeResize);
   document.querySelectorAll("[data-tree-node]").forEach((node) => {
     node.addEventListener("click", () => selectAdminTreeNode(JSON.parse(decodeURIComponent(node.dataset.treeNode))));
     node.addEventListener("keydown", (event) => {
@@ -1536,6 +1554,27 @@ function bindEvents() {
     form.addEventListener("submit", saveAdminEditor);
   });
   bindIssueDetailEvents();
+}
+
+function startTreeResize(event) {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = Number(state.adminTreeWidth) || 300;
+  const workbench = document.querySelector(".data-workbench");
+  let nextWidth = startWidth;
+  document.body.classList.add("resizing-tree");
+  const move = (moveEvent) => {
+    nextWidth = clampTreeWidth(startWidth + moveEvent.clientX - startX);
+    workbench?.style.setProperty("--tree-width", `${nextWidth}px`);
+  };
+  const stop = () => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", stop);
+    document.body.classList.remove("resizing-tree");
+    setState({ adminTreeWidth: nextWidth }, false);
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", stop);
 }
 
 function handleSelectorChange(field, value) {
@@ -1634,6 +1673,10 @@ function selectAdminProject(projectId) {
   });
 }
 
+function clampTreeWidth(width) {
+  return Math.max(240, Math.min(460, Math.round(width)));
+}
+
 function selectAdminTreeNode(node) {
   const patch = {
     adminTreeSelection: node,
@@ -1652,6 +1695,33 @@ function toggleTreeNode(encodedNode) {
     collapsed.add(encodedNode);
   }
   setState({ collapsedTreeNodes: [...collapsed] });
+}
+
+function getTreeNodeSubtitle(node, stats) {
+  if (node.type !== "equipment") return "";
+  const equipment = state.data.equipment.find((item) => item.id === node.equipmentId);
+  const location = state.data.locations.find((item) => item.id === equipment?.locationId);
+  const parts = parseLocationParts(location?.name || "");
+  const place = [parts.floor, parts.room].filter(Boolean).join(" / ");
+  return [equipment?.type || "Equipment", place, `${stats.passed}/${stats.total}`].filter(Boolean).join(" · ");
+}
+
+function getAdminContextSegments() {
+  const projectId = state.adminProjectId || state.selectedProjectId;
+  const project = state.data.projects.find((item) => item.id === projectId);
+  const selected = state.adminTreeSelection;
+  if (!selected) return [project?.name || t("allNodes")];
+  const segments = [project?.name || t("allNodes")];
+  if (selected.type === "building") segments.push(selected.building);
+  if (selected.type === "floor") segments.push(selected.building, selected.floor);
+  if (selected.type === "room") segments.push(selected.building, selected.floor, selected.room);
+  if (selected.type === "equipment") {
+    const equipment = state.data.equipment.find((item) => item.id === selected.equipmentId);
+    const location = state.data.locations.find((item) => item.id === equipment?.locationId);
+    const parts = parseLocationParts(location?.name || "");
+    segments.push(parts.building, parts.floor, parts.room, equipment?.name || selected.label);
+  }
+  return segments.filter(Boolean);
 }
 
 function updateAdminFilter(field) {

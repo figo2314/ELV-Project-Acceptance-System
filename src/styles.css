@@ -1394,7 +1394,7 @@ button.kpi-card.active {
 .data-workbench {
   display: grid;
   gap: 16px;
-  grid-template-columns: clamp(220px, 18vw, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, var(--tree-width, 300px)) minmax(0, 1fr);
   min-height: calc(100vh - 132px);
   min-width: 0;
   width: 100%;
@@ -1520,9 +1520,73 @@ button.kpi-card.active {
   top: 96px;
 }
 
+.tree-resize-handle {
+  bottom: 12px;
+  cursor: col-resize;
+  position: absolute;
+  right: -8px;
+  top: 12px;
+  width: 12px;
+  z-index: 20;
+}
+
+.tree-resize-handle::after {
+  background: #cbd5e1;
+  border-radius: 999px;
+  content: "";
+  height: 44px;
+  left: 5px;
+  opacity: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity 0.16s ease;
+  width: 3px;
+}
+
+.tree-panel:hover .tree-resize-handle::after,
+.resizing-tree .tree-resize-handle::after {
+  opacity: 1;
+}
+
+.resizing-tree {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .data-panel {
   min-width: 0;
   overflow: hidden;
+}
+
+.data-context-bar {
+  align-items: center;
+  background: #f8fbfa;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.data-context-bar span {
+  color: #64748b;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-context-bar strong {
+  color: #1e293b;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-view {
@@ -1558,6 +1622,13 @@ button.kpi-card.active {
   width: 100%;
 }
 
+.tree-node.has-subtitle {
+  align-items: flex-start;
+  min-height: 46px;
+  padding-bottom: 6px;
+  padding-top: 6px;
+}
+
 .tree-node:hover {
   background: #f8fafc;
 }
@@ -1577,6 +1648,11 @@ button.kpi-card.active {
 }
 
 .location-tree-view .tree-node:hover .tree-title {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.location-tree-view .tree-node:hover .tree-subtitle {
   overflow: visible;
   text-overflow: clip;
 }
@@ -1621,9 +1697,29 @@ button.kpi-card.active {
   min-width: 0;
 }
 
+.tree-node.has-subtitle .tree-label {
+  align-items: flex-start;
+}
+
+.tree-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .tree-title {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-subtitle {
+  color: #94a3b8;
+  display: block;
+  font-size: 11px;
+  line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1669,6 +1765,10 @@ button.kpi-card.active {
   gap: 7px;
   justify-content: flex-end;
   margin-left: auto;
+}
+
+.tree-node.has-subtitle .tree-meta {
+  padding-top: 3px;
 }
 
 .tree-count {
@@ -2062,6 +2162,10 @@ button.kpi-card.active {
   .tree-panel {
     max-height: none;
     position: static;
+  }
+
+  .tree-resize-handle {
+    display: none;
   }
 
   .field-sidebar {
