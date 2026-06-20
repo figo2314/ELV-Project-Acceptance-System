@@ -1563,19 +1563,19 @@ button.kpi-card.active {
   width: 8px;
 }
 
-.tree-status-dot.empty {
+.tree-status-dot.tree-status-empty {
   background: #9aa9ae;
 }
 
-.tree-status-dot.pending {
+.tree-status-dot.tree-status-pending {
   background: #d59a19;
 }
 
-.tree-status-dot.risk {
+.tree-status-dot.tree-status-risk {
   background: var(--danger);
 }
 
-.tree-status-dot.complete {
+.tree-status-dot.tree-status-complete {
   background: var(--success);
 }
 

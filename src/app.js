@@ -1167,7 +1167,7 @@ function renderTreeNode(node, level, hasChildren = false, collapsed = false) {
         <span class="tree-title">${escapeHtml(node.label)}</span>
       </span>
       <span class="tree-meta" title="${stats.failed + stats.rectification} ${t("issueQty")} / ${stats.pending} ${t("pending")}">
-        <i class="tree-status-dot ${tone}"></i>
+        <i class="tree-status-dot tree-status-${tone}"></i>
         <small class="tree-count">${stats.passed}/${stats.total}</small>
       </span>
     </div>
