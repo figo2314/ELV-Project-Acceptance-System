@@ -1,4 +1,6 @@
 const STORAGE_KEY = "elv-acceptance-offline-v2";
+const ATTACHMENT_DB_NAME = "elv-acceptance-attachments";
+const ATTACHMENT_STORE = "attachments";
 const API_BASE =
   window.__ELV_API_BASE__ ||
   import.meta.env?.VITE_API_BASE ||
@@ -335,13 +337,27 @@ function defaultState() {
 }
 
 function loadState() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return defaultState();
-  return { ...defaultState(), ...JSON.parse(stored) };
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return defaultState();
+    return { ...defaultState(), ...JSON.parse(stored) };
+  } catch (error) {
+    console.warn("Unable to load saved ELV state. Falling back to defaults.", error);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore storage cleanup failures; default state keeps the UI usable.
+    }
+    return defaultState();
+  }
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn("Unable to persist ELV state. Browser storage may be full.", error);
+  }
 }
 
 async function bootstrapFromServer() {
@@ -397,6 +413,7 @@ function render() {
     </main>
   `;
   bindEvents();
+  hydrateLocalAttachmentImages();
 }
 
 function renderTopbar() {
@@ -757,7 +774,7 @@ function renderAttachmentDock(record) {
       <button type="button" class="ghost" data-action="translate">${t("translate")}</button>
       <button class="primary" type="submit">${t("save")}</button>
       <div class="photos">
-        ${(record.photos || []).map((photo) => `<img src="${photo.dataUrl || photo}" alt="${escapeHtml(photo.name || "Inspection photo")}" />`).join("")}
+        ${(record.photos || []).map(renderAttachmentThumb).join("")}
       </div>
     </form>
   `;
@@ -840,7 +857,7 @@ function renderInspectionForm(record) {
         <button type="button" class="ghost" data-action="translate">${t("translate")}</button>
       </div>
       <div class="photos">
-        ${(record.photos || []).map((photo) => `<img src="${photo.dataUrl || photo}" alt="${escapeHtml(photo.name || "Inspection photo")}" />`).join("")}
+        ${(record.photos || []).map(renderAttachmentThumb).join("")}
       </div>
       <button class="primary" type="submit">${t("save")}</button>
     </form>
@@ -1259,7 +1276,7 @@ function renderIssueModal() {
           <div class="section-title">${t("attachments")}</div>
           ${
             photos.length
-              ? `<div class="modal-photos">${photos.map((photo) => `<img src="${photo.dataUrl || photo}" alt="${escapeHtml(photo.name || "Issue photo")}" />`).join("")}</div>`
+              ? `<div class="modal-photos">${photos.map(renderAttachmentThumb).join("")}</div>`
               : `<div class="empty small">${t("noPhotos")}</div>`
           }
         </div>
@@ -1583,8 +1600,8 @@ async function saveInspection(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const id = form.dataset.form;
-  const cameraFiles = await filesToDataUrls(form.camera.files);
-  const attachmentFiles = await filesToDataUrls(form.attachments.files);
+  const files = [...form.camera.files, ...form.attachments.files];
+  const attachments = await storeInspectionAttachments(files);
   const records = state.data.records.map((record) => {
     if (record.id !== id) return record;
     const result = form.result?.value || record.result || "Pending";
@@ -1594,7 +1611,7 @@ async function saveInspection(event) {
       title: form.title?.value || record.title,
       result,
       comments: form.comments?.value || record.comments || "",
-      photos: [...(record.photos || []), ...cameraFiles, ...attachmentFiles],
+      photos: [...(record.photos || []), ...attachments],
       status: statusFromResult(result),
       sync: "pending",
       localUpdatedAt: now.getTime(),
@@ -1656,15 +1673,26 @@ async function syncRecords(showToast) {
     return;
   }
   try {
-    const response = await apiPost("/sync", { records: pending });
+    const uploadResult = await uploadPendingLocalAttachments(pending);
+    if (uploadResult.uploadedLocalIds.length) {
+      persistUploadedAttachmentRecords(uploadResult.records);
+      await deleteLocalAttachments(uploadResult.uploadedLocalIds);
+    }
+    const response = await apiPost("/sync", { records: uploadResult.records });
     const { conflicts = [], ...serverData } = response;
-    const data = mergeLocalPendingRecords(serverData, pending, conflicts);
+    const data = mergeLocalPendingRecords(serverData, uploadResult.records, conflicts);
     setState({ data: normalizeSelection(data), conflicts, serverOnline: true });
     if (showToast) flash(conflicts.length ? t("syncConflicts") : t("synced"));
   } catch {
     setState({ serverOnline: false });
     if (showToast) flash(t("serverOffline"));
   }
+}
+
+function persistUploadedAttachmentRecords(records) {
+  const uploadedById = new Map(records.map((record) => [record.id, record]));
+  const nextRecords = state.data.records.map((record) => uploadedById.get(record.id) || record);
+  setState({ data: refreshLocalStatuses({ ...state.data, records: nextRecords }) }, false);
 }
 
 function getPendingRecords() {
@@ -2074,6 +2102,99 @@ function option(value, label, selected) {
   return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
 }
 
+function renderAttachmentThumb(photo) {
+  const src = getAttachmentSrc(photo);
+  const name = typeof photo === "object" ? photo.name || "Inspection photo" : "Inspection photo";
+  if (src && isImageAttachment(photo)) return `<img src="${escapeHtml(src)}" alt="${escapeHtml(name)}" />`;
+  if (src) return `<a class="attachment-chip" href="${escapeHtml(src)}" target="_blank" rel="noreferrer">${escapeHtml(name)}</a>`;
+  if (photo?.localId && isImageAttachment(photo)) return `<img data-local-attachment="${escapeHtml(photo.localId)}" alt="${escapeHtml(name)}" />`;
+  return `<div class="attachment-chip">${escapeHtml(name)}</div>`;
+}
+
+function getAttachmentSrc(photo) {
+  if (!photo) return "";
+  if (typeof photo === "string") return photo;
+  return resolveAttachmentUrl(photo.url) || photo.dataUrl || "";
+}
+
+function resolveAttachmentUrl(url) {
+  if (!url) return "";
+  if (/^(data:|blob:|https?:)/i.test(url)) return url;
+  if (!url.startsWith("/uploads/")) return url;
+  try {
+    return `${new URL(API_BASE, window.location.href).origin}${url}`;
+  } catch {
+    return url;
+  }
+}
+
+function isImageAttachment(photo) {
+  if (!photo) return false;
+  if (typeof photo === "string") return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(photo) || photo.startsWith("data:image/");
+  return String(photo.type || "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(photo.name || photo.url || "");
+}
+
+async function hydrateLocalAttachmentImages() {
+  const images = [...document.querySelectorAll("img[data-local-attachment]")];
+  if (!images.length) return;
+  await Promise.all(
+    images.map(async (image) => {
+      const attachment = await getLocalAttachment(image.dataset.localAttachment);
+      if (attachment?.dataUrl) image.src = attachment.dataUrl;
+    })
+  );
+}
+
+async function storeInspectionAttachments(files) {
+  const dataFiles = await filesToDataUrls(files);
+  if (!dataFiles.length) return [];
+  try {
+    const response = await apiPost("/attachments", { files: dataFiles });
+    return response.files || [];
+  } catch {
+    const localAttachments = [];
+    for (const file of dataFiles) {
+      const localId = createLocalAttachmentId();
+      try {
+        await putLocalAttachment({ ...file, localId, createdAt: Date.now() });
+        localAttachments.push({ name: file.name, type: file.type, localId, pendingUpload: true });
+      } catch (error) {
+        console.warn("Unable to save local attachment.", error);
+      }
+    }
+    return localAttachments;
+  }
+}
+
+async function uploadPendingLocalAttachments(records) {
+  const localIds = [
+    ...new Set(
+      records
+        .flatMap((record) => record.photos || [])
+        .map((photo) => photo?.localId)
+        .filter(Boolean)
+    )
+  ];
+  if (!localIds.length) return { records, uploadedLocalIds: [] };
+
+  const localFiles = (await Promise.all(localIds.map(getLocalAttachment))).filter(Boolean);
+  if (!localFiles.length) return { records, uploadedLocalIds: [] };
+  const response = await apiPost("/attachments", { files: localFiles });
+  const uploaded = response.files || [];
+  const replacements = new Map();
+  uploaded.forEach((file, index) => {
+    replacements.set(localFiles[index].localId, file);
+  });
+
+  return {
+    records: records.map((record) => ({
+      ...record,
+      photos: (record.photos || []).map((photo) => (photo?.localId && replacements.has(photo.localId) ? replacements.get(photo.localId) : photo))
+    })),
+    uploadedLocalIds: [...replacements.keys()]
+  };
+}
+
 function filesToDataUrls(files) {
   return Promise.all([...files].map(async (file) => ({ name: file.name, type: file.type, dataUrl: await fileToDataUrl(file) })));
 }
@@ -2084,6 +2205,72 @@ function fileToDataUrl(file) {
     reader.onload = () => resolve(reader.result);
     reader.readAsDataURL(file);
   });
+}
+
+function createLocalAttachmentId() {
+  if (crypto.randomUUID) return `att_${crypto.randomUUID()}`;
+  return `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function openAttachmentDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(ATTACHMENT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(ATTACHMENT_STORE, { keyPath: "localId" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function withAttachmentStore(mode, callback) {
+  const db = await openAttachmentDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(ATTACHMENT_STORE, mode);
+    const store = transaction.objectStore(ATTACHMENT_STORE);
+    const result = callback(store);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve(result);
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function putLocalAttachment(attachment) {
+  await withAttachmentStore("readwrite", (store) => store.put(attachment));
+}
+
+async function getLocalAttachment(localId) {
+  if (!localId) return null;
+  try {
+    return await withAttachmentStore("readonly", (store) => idbRequest(store.get(localId)));
+  } catch (error) {
+    console.warn("Unable to read local attachment.", error);
+    return null;
+  }
+}
+
+async function deleteLocalAttachments(localIds) {
+  const ids = localIds.filter(Boolean);
+  if (!ids.length) return;
+  try {
+    await withAttachmentStore("readwrite", (store) => {
+      ids.forEach((id) => store.delete(id));
+    });
+  } catch (error) {
+    console.warn("Unable to clear synced local attachments.", error);
+  }
 }
 
 async function readExcelRows(file) {

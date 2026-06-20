@@ -424,6 +424,23 @@ textarea {
   width: 100%;
 }
 
+.attachment-chip {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #eef4f3;
+  border: 1px solid #dbe7e5;
+  border-radius: 8px;
+  color: #526168;
+  display: flex;
+  font-size: 12px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+
 .primary {
   background: var(--brand);
   border-radius: 8px;

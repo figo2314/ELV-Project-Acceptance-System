@@ -1,4 +1,5 @@
 import express from "express";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const dataDir = path.join(rootDir, "data");
 const dbPath = path.join(dataDir, "db.json");
+const uploadDir = path.join(dataDir, "uploads");
 const port = Number(process.env.API_PORT || 4177);
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
@@ -36,6 +38,7 @@ app.use((request, response, next) => {
   next();
 });
 app.use(express.json({ limit: "25mb" }));
+app.use("/uploads", express.static(uploadDir));
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true, time: Date.now() });
@@ -122,35 +125,41 @@ app.post("/api/sync", async (request, response) => {
   response.json({ ...db, conflicts });
 });
 
+app.post("/api/attachments", async (request, response) => {
+  const files = Array.isArray(request.body.files) ? request.body.files : [];
+  if (!files.length) {
+    response.status(400).json({ error: "Missing attachment files." });
+    return;
+  }
+
+  try {
+    await mkdir(uploadDir, { recursive: true });
+    const savedFiles = [];
+    for (const file of files) {
+      savedFiles.push(await saveAttachment(file));
+    }
+    response.status(201).json({ files: savedFiles });
+  } catch (error) {
+    response.status(error.status || 400).json({ error: error.message || "Unable to save attachments." });
+  }
+});
+
 app.post("/api/equipment", async (request, response) => {
-  const equipment = await withDbMutation(async (db) => {
-    const item = {
-      id: request.body.id || createId("eq"),
-      projectId: request.body.projectId,
-      locationId: request.body.locationId,
-      team: request.body.team || "BMS",
-      name: request.body.name,
-      type: request.body.type || "Equipment",
-      status: request.body.status || "pending"
-    };
+  const result = await withDbMutation(async (db) => {
+    const item = validateEquipmentPayload(db, request.body || {}, "eq");
+    if (item.mutationError) return item;
     db.equipment.push(item);
     return item;
   });
-  response.status(201).json(equipment);
+  if (sendMutationError(response, result)) return;
+  response.status(201).json(result);
 });
 
 app.post("/api/admin/equipment", async (request, response) => {
   const body = request.body || {};
-  const db = await withDbMutation(async (db) => {
-    const equipment = {
-      id: body.id || createId("e"),
-      projectId: body.projectId || db.projects[0]?.id,
-      locationId: body.locationId || db.locations[0]?.id,
-      team: body.team || "BMS",
-      name: body.name || "New Equipment",
-      type: body.type || "Equipment",
-      status: body.status || "pending"
-    };
+  const result = await withDbMutation(async (db) => {
+    const equipment = validateEquipmentPayload(db, body, "e");
+    if (equipment.mutationError) return equipment;
     const index = db.equipment.findIndex((item) => item.id === equipment.id);
     if (index === -1) {
       db.equipment.push(equipment);
@@ -167,7 +176,8 @@ app.post("/api/admin/equipment", async (request, response) => {
 
     return db;
   });
-  response.json(db);
+  if (sendMutationError(response, result)) return;
+  response.json(result);
 });
 
 app.post("/api/admin/project", async (request, response) => {
@@ -415,6 +425,80 @@ function sendMutationError(response, result) {
   if (!result?.mutationError) return false;
   response.status(result.status || 500).json({ error: result.error || "Database mutation failed." });
   return true;
+}
+
+async function saveAttachment(file) {
+  const parsed = parseDataUrl(file?.dataUrl);
+  if (!parsed) {
+    const error = new Error("Attachment must be a data URL.");
+    error.status = 400;
+    throw error;
+  }
+  const originalName = sanitizeFileName(file.name || "attachment");
+  const extension = getSafeExtension(originalName, parsed.mimeType);
+  const storedName = `${Date.now()}-${randomUUID()}${extension}`;
+  await writeFile(path.join(uploadDir, storedName), parsed.buffer);
+  return {
+    name: originalName,
+    type: file.type || parsed.mimeType,
+    size: parsed.buffer.length,
+    url: `/uploads/${storedName}`,
+    uploadedAt: new Date().toISOString()
+  };
+}
+
+function parseDataUrl(dataUrl) {
+  if (typeof dataUrl !== "string") return null;
+  const match = dataUrl.match(/^data:([^;,]+)?;base64,(.+)$/);
+  if (!match) return null;
+  return {
+    mimeType: match[1] || "application/octet-stream",
+    buffer: Buffer.from(match[2], "base64")
+  };
+}
+
+function sanitizeFileName(name) {
+  const clean = path.basename(String(name)).replace(/[^\w.\- ()\u4e00-\u9fff]/g, "_").trim();
+  return clean || "attachment";
+}
+
+function getSafeExtension(name, mimeType) {
+  const ext = path.extname(name).toLowerCase();
+  if (ext && ext.length <= 10) return ext;
+  const map = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "application/pdf": ".pdf",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx"
+  };
+  return map[mimeType] || ".bin";
+}
+
+function validateEquipmentPayload(db, body, prefix) {
+  const projectId = String(body.projectId || "").trim();
+  const locationId = String(body.locationId || "").trim();
+  const name = String(body.name || "").trim();
+  const project = db.projects.find((item) => item.id === projectId);
+  const location = db.locations.find((item) => item.id === locationId);
+  if (!projectId || !locationId || !name) {
+    return mutationError(400, "projectId, locationId and name are required.");
+  }
+  if (!project) return mutationError(400, "Project not found.");
+  if (!location || location.projectId !== projectId) return mutationError(400, "Location not found for project.");
+  return {
+    id: body.id || createId(prefix),
+    projectId,
+    locationId,
+    team: String(body.team || "BMS").trim() || "BMS",
+    name,
+    type: String(body.type || "Equipment").trim() || "Equipment",
+    status: String(body.status || "pending").trim() || "pending"
+  };
 }
 
 function createId(prefix) {
