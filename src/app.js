@@ -2997,6 +2997,12 @@ async function saveMedia(event) {
   const form = event.currentTarget;
   const equipmentId = form.dataset.mediaUploadForm;
   const payload = Object.fromEntries(new FormData(form).entries());
+  pendingMediaUploadDraft = {
+    category: payload.category || getUploadMediaCategory(),
+    title: payload.title || "",
+    reference: payload.reference || "",
+    comments: payload.comments || ""
+  };
   const files = pendingMediaUploadFiles.length ? pendingMediaUploadFiles : [...(form.mediaFiles?.files || [])];
   if (!files.length && !String(payload.comments || "").trim()) return;
   const totalSize = getTotalFileSize(files);
