@@ -894,7 +894,7 @@ function renderPointActionRow(point) {
       </button>
       <span class="badge ${record?.status || point.status}">${statusLabel(record?.status || point.status)}</span>
       <div class="quick-actions">
-        ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}" ${record ? "" : "disabled"}>${result}</button>`).join("")}
+        ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}" data-point-id="${point.id}">${result}</button>`).join("")}
         <button class="ghost compact" data-comment-record="${record?.id || ""}" ${record ? "" : "disabled"}>${t("addComment")}</button>
         <button class="ghost compact" data-edit-point="${point.id}">${t("editPoint")}</button>
       </div>
@@ -1801,7 +1801,7 @@ function bindEvents() {
     button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.record }));
   });
   document.querySelectorAll("[data-quick-result]").forEach((button) => {
-    button.addEventListener("click", () => updateRecordQuick(button.dataset.record, button.dataset.quickResult));
+    button.addEventListener("click", () => updateRecordQuick(button.dataset.record, button.dataset.quickResult, button.dataset.pointId));
   });
   document.querySelectorAll("[data-comment-record]").forEach((button) => {
     button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.commentRecord }));
@@ -2106,13 +2106,46 @@ async function saveInspection(event) {
   await syncRecords(false);
 }
 
-async function updateRecordQuick(recordId, result) {
-  if (!recordId || !state.data.records.some((record) => record.id === recordId)) {
+async function updateRecordQuick(recordId, result, pointId = "") {
+  const ensuredRecordId = ensureRecordForPoint(recordId, pointId);
+  if (!ensuredRecordId) {
     flash(t("noRecord"));
     return;
   }
-  updateRecord(recordId, { result, status: statusFromResult(result) });
+  updateRecord(ensuredRecordId, { result, status: statusFromResult(result) });
   await syncRecords(false);
+}
+
+function ensureRecordForPoint(recordId, pointId) {
+  if (recordId && state.data.records.some((record) => record.id === recordId)) return recordId;
+  const point = state.data.points.find((item) => item.id === pointId);
+  if (!point) return "";
+  const existing = state.data.records.find((record) => record.pointId === point.id);
+  if (existing) return existing.id;
+  const equipment = state.data.equipment.find((item) => item.id === point.equipmentId);
+  if (!equipment) return "";
+  const now = new Date();
+  const nextRecord = {
+    id: createLocalId("r"),
+    projectId: equipment.projectId,
+    locationId: equipment.locationId,
+    team: equipment.team,
+    equipmentId: equipment.id,
+    pointId: point.id,
+    title: `${equipment.name} - ${point.name}`,
+    status: point.status || "pending",
+    result: "Pending",
+    comments: "",
+    photos: [],
+    assignee: "",
+    due: "",
+    sync: "pending",
+    localUpdatedAt: now.getTime(),
+    updatedAt: now.toLocaleString("sv-SE")
+  };
+  const data = refreshLocalStatuses({ ...state.data, records: [...state.data.records, nextRecord] });
+  setState({ data, selectedPointId: point.id, selectedRecordId: nextRecord.id }, false);
+  return nextRecord.id;
 }
 
 async function updateRecordComment(recordId, comments) {
@@ -2568,6 +2601,11 @@ function statusFromResult(result) {
   if (result === "N/A") return "closed";
   if (result === "Rectification") return "rectification";
   return "pending";
+}
+
+function createLocalId(prefix) {
+  if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function refreshLocalStatuses(data) {
