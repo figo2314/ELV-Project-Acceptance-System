@@ -326,6 +326,7 @@ const fallbackData = {
 
 let state = loadState();
 let adminSearchTimer = null;
+const mediaDropFiles = new WeakMap();
 
 init();
 
@@ -362,6 +363,11 @@ function defaultState() {
     dashboardFilter: "all",
     dashboardEntityId: "",
     mediaEquipmentId: "e1",
+    mediaProjectId: "",
+    mediaBuilding: "",
+    mediaFloor: "",
+    mediaRoom: "",
+    mediaSearch: "",
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -1194,12 +1200,15 @@ function renderDashboardPrimaryPanel() {
 }
 
 function renderMediaPage() {
-  const equipment = state.data.equipment;
+  const equipment = getFilteredMediaEquipment();
   const activeEquipment = equipment.find((item) => item.id === state.mediaEquipmentId) || equipment[0];
-  const media = (state.data.media || []).filter((item) => item.equipmentId === activeEquipment?.id);
+  const media = getEquipmentMedia(activeEquipment?.id);
   const records = state.data.records.filter((record) => record.equipmentId === activeEquipment?.id);
   return `
     <section class="media-workbench">
+      <section class="panel media-filter-panel">
+        ${renderMediaFilters()}
+      </section>
       <aside class="panel media-device-panel">
         <div class="section-title">${t("equipment")}</div>
         <div class="media-device-list">
@@ -1219,23 +1228,21 @@ function renderMediaPage() {
                 <span class="badge ${activeEquipment.status || "pending"}">${statusLabel(activeEquipment.status || "pending")}</span>
               </div>
               <form class="media-upload-card" data-media-form="${activeEquipment.id}">
-                <label>${t("mediaType")}
-                  <select name="category">
-                    ${["drawing", "map", "locationPlan", "wiring", "photo", "document"].map((type) => option(type, t(type), "drawing")).join("")}
-                  </select>
-                </label>
+                <input type="hidden" name="category" value="drawing" />
+                <div class="media-type-grid">
+                  ${getMediaTypes().map((type, index) => `<button type="button" class="${index === 0 ? "active" : ""}" data-media-type="${type}">${t(type)}</button>`).join("")}
+                </div>
                 <label>${t("mediaComments")}
                   <textarea name="comments" rows="3" placeholder="${t("commentPlaceholder")}"></textarea>
                 </label>
-                <label class="file-button">${t("uploadMedia")}
+                <label class="media-drop-zone" data-media-drop-zone>${t("uploadMedia")}
+                  <span>Drop PDF, drawing, location photo or wiring image here</span>
                   <input name="mediaFiles" type="file" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple />
                 </label>
                 <button class="primary" type="submit">${t("saveChanges")}</button>
               </form>
               <div class="media-section-title">${t("attachments")} <span>${media.length}</span></div>
-              <div class="media-grid">
-                ${media.map(renderMediaCard).join("") || `<div class="empty small">${t("noMedia")}</div>`}
-              </div>
+              ${renderMediaTypeSections(media)}
               <div class="media-section-title">${t("comments")} <span>${records.filter((record) => record.comments).length}</span></div>
               <div class="media-comment-list">
                 ${records.filter((record) => record.comments).map(renderMediaComment).join("") || `<div class="empty small">${t("noRecord")}</div>`}
@@ -1249,7 +1256,7 @@ function renderMediaPage() {
 }
 
 function renderMediaEquipmentButton(equipment, activeId) {
-  const mediaCount = (state.data.media || []).filter((item) => item.equipmentId === equipment.id).length;
+  const mediaCount = getEquipmentMedia(equipment.id).length;
   const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
   const commentCount = records.filter((record) => record.comments).length;
   return `
@@ -1261,6 +1268,159 @@ function renderMediaEquipmentButton(equipment, activeId) {
       <em>${mediaCount} ${t("attachments")} / ${commentCount} ${t("comments")}</em>
     </button>
   `;
+}
+
+function renderMediaFilters() {
+  const projects = state.data.projects;
+  const projectId = state.mediaProjectId || "";
+  const equipment = state.data.equipment.filter((item) => !projectId || item.projectId === projectId);
+  const locationParts = equipment.map((item) => parseLocationParts(getLocationName(item.locationId)));
+  const buildings = uniqueSorted(locationParts.map((item) => item.building));
+  const floors = uniqueSorted(locationParts.filter((item) => !state.mediaBuilding || item.building === state.mediaBuilding).map((item) => item.floor));
+  const rooms = uniqueSorted(
+    locationParts
+      .filter((item) => !state.mediaBuilding || item.building === state.mediaBuilding)
+      .filter((item) => !state.mediaFloor || item.floor === state.mediaFloor)
+      .map((item) => item.room)
+  );
+  return `
+    <div class="media-filter-grid">
+      <label>${t("project")}
+        <select data-media-filter="mediaProjectId">
+          <option value="">${t("allNodes")}</option>
+          ${projects.map((project) => option(project.id, project.name, projectId)).join("")}
+        </select>
+      </label>
+      <label>${t("building")}
+        <select data-media-filter="mediaBuilding">
+          <option value="">${t("allNodes")}</option>
+          ${buildings.map((item) => option(item, item, state.mediaBuilding)).join("")}
+        </select>
+      </label>
+      <label>${t("floor")}
+        <select data-media-filter="mediaFloor">
+          <option value="">${t("allNodes")}</option>
+          ${floors.map((item) => option(item, item, state.mediaFloor)).join("")}
+        </select>
+      </label>
+      <label>${t("room")}
+        <select data-media-filter="mediaRoom">
+          <option value="">${t("allNodes")}</option>
+          ${rooms.map((item) => option(item, item, state.mediaRoom)).join("")}
+        </select>
+      </label>
+      <label>${t("search")}
+        <input data-media-filter="mediaSearch" value="${escapeHtml(state.mediaSearch || "")}" placeholder="Search equipment, type, location, media comments" />
+      </label>
+    </div>
+  `;
+}
+
+function renderMediaTypeSections(media) {
+  const types = getMediaTypes();
+  return `
+    <div class="media-type-sections">
+      ${types
+        .map((type) => {
+          const items = media.filter((item) => (item.category || "document") === type);
+          return `
+            <section class="media-type-section">
+              <div class="media-section-title">${t(type)} <span>${items.length}</span></div>
+              <div class="media-grid">
+                ${items.map(renderMediaCard).join("") || `<div class="empty small">${t("noMedia")}</div>`}
+              </div>
+            </section>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function getFilteredMediaEquipment() {
+  const search = String(state.mediaSearch || "").trim().toLowerCase();
+  return state.data.equipment.filter((item) => {
+    if (state.mediaProjectId && item.projectId !== state.mediaProjectId) return false;
+    const location = getLocationName(item.locationId);
+    const parts = parseLocationParts(location);
+    if (state.mediaBuilding && parts.building !== state.mediaBuilding) return false;
+    if (state.mediaFloor && parts.floor !== state.mediaFloor) return false;
+    if (state.mediaRoom && parts.room !== state.mediaRoom) return false;
+    if (!search) return true;
+    const mediaText = getEquipmentMedia(item.id).map((media) => `${media.comments || ""} ${media.file?.name || ""} ${media.category || ""}`).join(" ");
+    return `${item.name} ${item.type} ${location} ${mediaText}`.toLowerCase().includes(search);
+  });
+}
+
+function getEquipmentMedia(equipmentId) {
+  if (!equipmentId) return [];
+  return [...getDemoMedia(), ...(state.data.media || [])].filter((item) => item.equipmentId === equipmentId);
+}
+
+function getMediaTypes() {
+  return ["drawing", "map", "locationPlan", "wiring", "photo", "document"];
+}
+
+function getDemoMedia() {
+  const equipment = state.data.equipment[0];
+  if (!equipment) return [];
+  return [
+    {
+      id: "demo-media-drawing",
+      equipmentId: equipment.id,
+      projectId: equipment.projectId,
+      locationId: equipment.locationId,
+      category: "drawing",
+      comments: "Demo BMS control schematic linked to the selected equipment.",
+      createdAt: "2026-06-21T09:00:00.000Z",
+      file: createDemoMediaFile("BMS-control-schematic.svg", "System Drawing", "#174f6f")
+    },
+    {
+      id: "demo-media-location",
+      equipmentId: equipment.id,
+      projectId: equipment.projectId,
+      locationId: equipment.locationId,
+      category: "locationPlan",
+      comments: "Demo location plan showing AHU room and nearby access path.",
+      createdAt: "2026-06-21T09:05:00.000Z",
+      file: createDemoMediaFile("AHU-room-location-plan.svg", "Location Plan", "#16864b")
+    },
+    {
+      id: "demo-media-wiring",
+      equipmentId: equipment.id,
+      projectId: equipment.projectId,
+      locationId: equipment.locationId,
+      category: "wiring",
+      comments: "Demo wiring diagram for DDC panel I/O and BACnet/IP link.",
+      createdAt: "2026-06-21T09:10:00.000Z",
+      file: createDemoMediaFile("DDC-wiring-diagram.svg", "Wiring Diagram", "#b66b00")
+    },
+    {
+      id: "demo-media-photo",
+      equipmentId: equipment.id,
+      projectId: equipment.projectId,
+      locationId: equipment.locationId,
+      category: "photo",
+      comments: "Demo site photo placeholder for panel front view.",
+      createdAt: "2026-06-21T09:15:00.000Z",
+      file: createDemoMediaFile("panel-front-photo.svg", "Site Photo", "#4d55b8")
+    }
+  ];
+}
+
+function createDemoMediaFile(name, label, color) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420"><rect width="640" height="420" fill="#f8fbfa"/><rect x="32" y="32" width="576" height="356" rx="18" fill="white" stroke="${color}" stroke-width="4"/><path d="M82 120h190v70H82zM368 120h190v70H368zM82 250h190v70H82zM368 250h190v70H368z" fill="${color}" opacity=".12" stroke="${color}" stroke-width="2"/><path d="M272 155h96M272 285h96M177 190v60M463 190v60" stroke="${color}" stroke-width="6" stroke-linecap="round"/><text x="54" y="78" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#17212b">${label}</text><text x="54" y="358" font-family="Arial, sans-serif" font-size="18" fill="#60727a">Demo equipment media preview</text></svg>`;
+  return {
+    name,
+    type: "image/svg+xml",
+    size: svg.length,
+    url: `data:image/svg+xml;base64,${btoa(svg)}`,
+    uploadedAt: "2026-06-21T09:00:00.000Z"
+  };
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
 function renderMediaCard(item) {
@@ -1966,6 +2126,53 @@ function setDashboardEquipment(equipmentId) {
   setState({ dashboardFilter: "equipment", dashboardEntityId: equipmentId || "", selectedIssueId: "" });
 }
 
+function updateMediaFilter(key, value) {
+  const patch = { [key]: value };
+  if (key === "mediaProjectId") {
+    patch.mediaBuilding = "";
+    patch.mediaFloor = "";
+    patch.mediaRoom = "";
+  }
+  if (key === "mediaBuilding") {
+    patch.mediaFloor = "";
+    patch.mediaRoom = "";
+  }
+  if (key === "mediaFloor") {
+    patch.mediaRoom = "";
+  }
+  const nextState = { ...state, ...patch };
+  const nextEquipment = state.data.equipment.find((item) => {
+    if (nextState.mediaProjectId && item.projectId !== nextState.mediaProjectId) return false;
+    const parts = parseLocationParts(getLocationName(item.locationId));
+    if (nextState.mediaBuilding && parts.building !== nextState.mediaBuilding) return false;
+    if (nextState.mediaFloor && parts.floor !== nextState.mediaFloor) return false;
+    if (nextState.mediaRoom && parts.room !== nextState.mediaRoom) return false;
+    return true;
+  });
+  patch.mediaEquipmentId = nextEquipment?.id || "";
+  setState(patch);
+}
+
+function selectMediaType(button) {
+  const form = button.closest("[data-media-form]");
+  form.querySelectorAll("[data-media-type]").forEach((item) => item.classList.toggle("active", item === button));
+  form.querySelector("input[name='category']").value = button.dataset.mediaType || "document";
+}
+
+function bindMediaDropZone(zone) {
+  const form = zone.closest("[data-media-form]");
+  zone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    zone.classList.add("dragging");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragging"));
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zone.classList.remove("dragging");
+    mediaDropFiles.set(form, [...event.dataTransfer.files]);
+  });
+}
+
 function compareIssuePriority(a, b) {
   const rank = { failed: 0, rectification: 1, pending: 2 };
   return (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || ageInDays(b) - ageInDays(a);
@@ -2006,6 +2213,13 @@ function bindEvents() {
   document.querySelectorAll("[data-media-equipment]").forEach((button) => {
     button.addEventListener("click", () => setState({ mediaEquipmentId: button.dataset.mediaEquipment }));
   });
+  document.querySelectorAll("[data-media-filter]").forEach((field) => {
+    field.addEventListener(field.tagName === "INPUT" ? "input" : "change", () => updateMediaFilter(field.dataset.mediaFilter, field.value));
+  });
+  document.querySelectorAll("[data-media-type]").forEach((button) => {
+    button.addEventListener("click", () => selectMediaType(button));
+  });
+  document.querySelectorAll("[data-media-drop-zone]").forEach(bindMediaDropZone);
   document.querySelectorAll("[data-media-form]").forEach((form) => {
     form.addEventListener("submit", saveMedia);
   });
@@ -2592,7 +2806,7 @@ async function saveMedia(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const equipmentId = form.dataset.mediaForm;
-  const files = [...form.mediaFiles.files];
+  const files = mediaDropFiles.get(form) || [...form.mediaFiles.files];
   if (!files.length && !form.comments.value.trim()) return;
   try {
     const uploaded = files.length ? await apiPost("/attachments", { files: await filesToDataUrls(files) }) : { files: [] };
@@ -2603,6 +2817,7 @@ async function saveMedia(event) {
       files: uploaded.files || []
     });
     setData(response);
+    mediaDropFiles.delete(form);
     setState({ mediaEquipmentId: equipmentId, toast: t("mediaSaved") });
     window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch {
