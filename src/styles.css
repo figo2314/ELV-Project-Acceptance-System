@@ -1757,20 +1757,38 @@ button.kpi-card.active {
 .dashboard-point-list {
   border: 1px solid #dfe9e6;
   border-radius: 12px;
+  max-width: 100%;
   overflow: hidden;
+  overflow-x: auto;
+}
+
+.dashboard-point-head,
+.dashboard-point-row {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 112px minmax(280px, 1fr) 220px 220px;
+  min-width: 860px;
+}
+
+.dashboard-point-head {
+  background: #edf4f2;
+  border-bottom: 1px solid #d8e5e2;
+  color: #526168;
+  font-size: 11px;
+  font-weight: 900;
+  min-height: 36px;
+  padding: 0 14px;
+  text-transform: uppercase;
 }
 
 .dashboard-point-row {
-  align-items: center;
   background: #fff;
   border: 0;
   border-bottom: 1px solid #e7eeee;
   color: inherit;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: auto minmax(240px, 1fr) minmax(150px, 0.6fr) minmax(120px, 0.5fr);
   min-height: 58px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   text-align: left;
   width: 100%;
 }
@@ -1786,12 +1804,23 @@ button.kpi-card.active {
 .dashboard-point-row strong,
 .dashboard-point-row small {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-point-status .badge {
+  justify-content: center;
+  min-width: 76px;
 }
 
 .dashboard-point-row em {
   color: #263941;
   font-style: normal;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-card-head {

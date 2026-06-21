@@ -1147,6 +1147,12 @@ function renderDashboardPrimaryPanel() {
     return `
       <div class="section-title">${meta.label}</div>
       <div class="dashboard-point-list">
+        <div class="dashboard-point-head">
+          <span>${t("status")}</span>
+          <span>${t("point")}</span>
+          <span>${t("equipment")}</span>
+          <span>${t("location")}</span>
+        </div>
         ${state.data.points.map(renderPointSummary).join("")}
       </div>
     `;
@@ -1296,7 +1302,7 @@ function renderPointSummary(point) {
   const status = record?.status || point.status || "pending";
   return `
     <button class="dashboard-point-row ${status}" data-issue-detail="${record?.id || ""}" ${record ? "" : "disabled"}>
-      <span class="badge ${status}">${statusLabel(status)}</span>
+      <span class="dashboard-point-status"><span class="badge ${status}">${statusLabel(status)}</span></span>
       <div>
         <strong>${escapeHtml(point.name)}</strong>
         <small>${escapeHtml(point.type)} / ${escapeHtml(point.reference || "-")}</small>
