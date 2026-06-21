@@ -1519,14 +1519,28 @@ textarea {
 
 .dashboard-hero {
   background:
-    linear-gradient(135deg, #10384f 0%, #174f6f 52%, #1f6f83 100%);
-  border-radius: 8px;
-  box-shadow: var(--shadow-md);
+    radial-gradient(circle at 12% 12%, rgb(217 249 157 / 22%), transparent 260px),
+    linear-gradient(135deg, #0d354c 0%, #174f6f 52%, #247f90 100%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 12px;
+  box-shadow: 0 22px 54px rgb(16 56 79 / 18%);
   color: #fff;
   display: grid;
   gap: 20px;
   grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.8fr);
-  padding: 24px;
+  overflow: hidden;
+  padding: 26px;
+  position: relative;
+}
+
+.dashboard-hero::after {
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 18%), transparent);
+  content: "";
+  height: 1px;
+  left: 24px;
+  position: absolute;
+  right: 24px;
+  top: 0;
 }
 
 .dashboard-hero h2 {
@@ -1548,11 +1562,12 @@ textarea {
 }
 
 .kpi-card {
-  background: rgb(255 255 255 / 10%);
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 8px;
+  background: rgb(255 255 255 / 12%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 10px;
   color: inherit;
-  padding: 14px;
+  min-height: 78px;
+  padding: 16px;
   text-align: left;
   width: 100%;
 }
@@ -1574,16 +1589,35 @@ textarea {
 }
 
 .kpi-card.warn {
-  background: rgb(255 210 90 / 18%);
+  background: linear-gradient(135deg, rgb(255 210 90 / 24%), rgb(255 255 255 / 10%));
 }
 
 .kpi-card.danger {
-  background: rgb(255 115 105 / 18%);
+  background: linear-gradient(135deg, rgb(255 115 105 / 24%), rgb(255 255 255 / 10%));
 }
 
 button.kpi-card {
   cursor: pointer;
+  position: relative;
   transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+button.kpi-card::after {
+  align-items: center;
+  background: rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  color: #d9f99d;
+  content: ">";
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  height: 24px;
+  justify-content: center;
+  opacity: 0.72;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 24px;
 }
 
 button.kpi-card:hover,
@@ -1600,7 +1634,7 @@ button.kpi-card.active {
 .dashboard-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.75fr);
 }
 
 .project-rank,
@@ -1608,6 +1642,13 @@ button.kpi-card.active {
   align-content: start;
   display: grid;
   gap: 12px;
+}
+
+.attention-panel {
+  max-height: calc(100vh - 196px);
+  overflow: auto;
+  position: sticky;
+  top: 86px;
 }
 
 .attention-head {
@@ -1626,12 +1667,21 @@ button.kpi-card.active {
 }
 
 .project-card {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  background:
+    linear-gradient(180deg, #fff, #fbfdfc);
+  border: 1px solid #dfe9e6;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgb(31 51 58 / 5%);
   display: grid;
-  gap: 14px;
-  padding: 14px;
+  gap: 12px;
+  padding: 16px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.project-card:hover {
+  border-color: #bed4d8;
+  box-shadow: 0 16px 34px rgb(31 51 58 / 8%);
+  transform: translateY(-1px);
 }
 
 .project-card-head {
@@ -1641,13 +1691,33 @@ button.kpi-card.active {
   justify-content: space-between;
 }
 
+.project-card .stats.wide {
+  gap: 8px;
+}
+
+.project-card .stat {
+  background: #f8fbfa;
+  border-color: #e4eeeb;
+  min-height: 64px;
+  padding: 10px 12px;
+}
+
+.project-card .stat strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.project-card .stat span {
+  font-size: 12px;
+}
+
 .project-title-block {
   display: grid;
   gap: 2px;
 }
 
 .project-title-block h2 {
-  font-size: 20px;
+  font-size: 19px;
   line-height: 1.2;
   margin: 0;
 }
@@ -1710,23 +1780,50 @@ button.kpi-card.active {
 }
 
 .issue-card {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-left: 5px solid var(--line-strong);
-  border-radius: 8px;
+  background:
+    linear-gradient(180deg, #fff, #fcfefe);
+  border: 1px solid #dfe9e6;
+  border-left: 4px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgb(31 51 58 / 5%);
   color: inherit;
   display: grid;
   gap: 10px;
-  padding: 14px;
+  padding: 14px 16px;
+  position: relative;
   text-align: left;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   width: 100%;
 }
 
 .issue-card:hover {
-  border-color: var(--brand);
-  box-shadow: var(--shadow-md);
+  border-color: #b8cbc7;
+  box-shadow: 0 18px 40px rgb(31 51 58 / 12%);
   transform: translateY(-1px);
+}
+
+.issue-card::after {
+  align-items: center;
+  background: #f0f6f5;
+  border-radius: 999px;
+  color: var(--brand);
+  content: ">";
+  display: inline-flex;
+  font-weight: 900;
+  height: 28px;
+  justify-content: center;
+  opacity: 0;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  transform: translateX(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  width: 28px;
+}
+
+.issue-card:hover::after {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .issue-card.failed {
@@ -1752,9 +1849,10 @@ button.kpi-card.active {
 }
 
 .issue-card h3 {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.25;
   margin: 0;
+  padding-right: 28px;
 }
 
 .issue-card p {
@@ -1862,6 +1960,7 @@ button.kpi-card.active {
   display: grid;
   gap: 10px;
   grid-template-columns: 54px 1fr;
+  margin-top: 2px;
 }
 
 .project-progress-line > span {
@@ -2851,6 +2950,12 @@ button.kpi-card.active {
   .panel {
     border-radius: 12px;
     padding: 12px;
+  }
+
+  .attention-panel {
+    max-height: none;
+    overflow: visible;
+    position: static;
   }
 
   .mobile-grid,
