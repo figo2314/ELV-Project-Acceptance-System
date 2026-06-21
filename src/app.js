@@ -333,6 +333,7 @@ function defaultState() {
     adminTreeWidthManual: false,
     adminColumnWidths: null,
     dashboardFilter: "all",
+    dashboardEntityId: "",
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -1094,8 +1095,7 @@ function renderAdminPage() {
     ${renderDashboardHero()}
     <section class="dashboard-grid">
       <section class="panel project-rank">
-        <div class="section-title">${t("projectRank")}</div>
-        ${state.data.projects.map(renderProjectSummary).join("")}
+        ${renderDashboardPrimaryPanel()}
       </section>
       <section class="panel attention-panel">
         ${renderAttentionHeader()}
@@ -1130,6 +1130,31 @@ function renderKpi(label, value, tone = "", filter = "") {
   const active = filter && state.dashboardFilter === filter ? "active" : "";
   if (!filter) return `<div class="kpi-card ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
   return `<button class="kpi-card ${tone} ${active}" data-dashboard-filter="${filter}"><strong>${value}</strong><span>${label}</span></button>`;
+}
+
+function renderDashboardPrimaryPanel() {
+  const filter = state.dashboardFilter || "all";
+  const meta = getDashboardFilterMeta(filter);
+  if (filter === "equipment") {
+    return `
+      <div class="section-title">${meta.label}</div>
+      <div class="dashboard-entity-grid">
+        ${state.data.equipment.map(renderEquipmentSummary).join("")}
+      </div>
+    `;
+  }
+  if (filter === "points") {
+    return `
+      <div class="section-title">${meta.label}</div>
+      <div class="dashboard-point-list">
+        ${state.data.points.map(renderPointSummary).join("")}
+      </div>
+    `;
+  }
+  return `
+    <div class="section-title">${filter === "projects" ? meta.label : t("projectRank")}</div>
+    ${state.data.projects.map(renderProjectSummary).join("")}
+  `;
 }
 
 function renderImportPage() {
@@ -1243,6 +1268,45 @@ function renderProjectSummary(project) {
   `;
 }
 
+function renderEquipmentSummary(equipment) {
+  const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
+  const points = state.data.points.filter((point) => point.equipmentId === equipment.id);
+  const stats = getStats(records);
+  const issueCount = stats.failed + stats.rectification;
+  return `
+    <button class="dashboard-entity-card ${equipment.status || "pending"} ${state.dashboardEntityId === equipment.id ? "active" : ""}" data-dashboard-equipment="${equipment.id}">
+      <div>
+        <p class="eyebrow">${escapeHtml(getProjectName(equipment.projectId))}</p>
+        <h3>${escapeHtml(equipment.name)}</h3>
+        <span>${escapeHtml(equipment.type)} &middot; ${escapeHtml(getCompactLocationName(equipment.locationId))}</span>
+      </div>
+      <div class="dashboard-entity-meta">
+        <strong>${stats.completion}%</strong>
+        <span>${points.length} ${t("pointCount")}</span>
+        <span>${issueCount} ${t("issueQty")}</span>
+      </div>
+      <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
+    </button>
+  `;
+}
+
+function renderPointSummary(point) {
+  const equipment = state.data.equipment.find((item) => item.id === point.equipmentId);
+  const record = state.data.records.find((item) => item.pointId === point.id);
+  const status = record?.status || point.status || "pending";
+  return `
+    <button class="dashboard-point-row ${status}" data-issue-detail="${record?.id || ""}" ${record ? "" : "disabled"}>
+      <span class="badge ${status}">${statusLabel(status)}</span>
+      <div>
+        <strong>${escapeHtml(point.name)}</strong>
+        <small>${escapeHtml(point.type)} / ${escapeHtml(point.reference || "-")}</small>
+      </div>
+      <em>${escapeHtml(equipment?.name || "-")}</em>
+      <small>${escapeHtml(equipment ? getCompactLocationName(equipment.locationId) : "-")}</small>
+    </button>
+  `;
+}
+
 function getProjectProgressTone(stats) {
   if (stats.total === 0 || stats.completion === 0) return "empty";
   if (stats.failed || stats.rectification) return "risk";
@@ -1292,6 +1356,9 @@ function getProjectDrilldownRecords() {
 }
 
 function getEquipmentDrilldownRecords() {
+  if (state.dashboardEntityId) {
+    return state.data.records.filter((record) => record.equipmentId === state.dashboardEntityId).sort(compareIssuePriority);
+  }
   return state.data.equipment
     .flatMap((equipment) => {
       const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
@@ -1751,7 +1818,7 @@ function handleEscapeKey(event) {
 }
 
 function setAdminPage(page) {
-  setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all" });
+  setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all", dashboardEntityId: page === "dashboard" ? state.dashboardEntityId : "" });
 }
 
 function setView(view) {
@@ -1759,7 +1826,11 @@ function setView(view) {
 }
 
 function setDashboardFilter(filter) {
-  setState({ dashboardFilter: filter || "all", selectedIssueId: "" });
+  setState({ dashboardFilter: filter || "all", dashboardEntityId: "", selectedIssueId: "" });
+}
+
+function setDashboardEquipment(equipmentId) {
+  setState({ dashboardFilter: "equipment", dashboardEntityId: equipmentId || "", selectedIssueId: "" });
 }
 
 function compareIssuePriority(a, b) {
@@ -1833,6 +1904,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-dashboard-filter]").forEach((button) => {
     button.addEventListener("click", () => setDashboardFilter(button.dataset.dashboardFilter));
+  });
+  document.querySelectorAll("[data-dashboard-equipment]").forEach((button) => {
+    button.addEventListener("click", () => setDashboardEquipment(button.dataset.dashboardEquipment));
   });
   document.querySelector("[data-action='toggle-lang']")?.addEventListener("click", () => setState({ lang: state.lang === "en" ? "zh" : "en" }));
   document.querySelectorAll("[data-field]").forEach((select) => {

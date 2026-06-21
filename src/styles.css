@@ -1684,6 +1684,116 @@ button.kpi-card.active {
   transform: translateY(-1px);
 }
 
+.dashboard-entity-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.dashboard-entity-card {
+  background:
+    linear-gradient(180deg, #fff, #fbfdfc);
+  border: 1px solid #dfe9e6;
+  border-left: 4px solid #b7c8c5;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgb(31 51 58 / 5%);
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  text-align: left;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.dashboard-entity-card:hover {
+  border-color: #bed4d8;
+  box-shadow: 0 16px 34px rgb(31 51 58 / 9%);
+  transform: translateY(-1px);
+}
+
+.dashboard-entity-card.active {
+  border-color: #2563eb;
+  box-shadow: inset 4px 0 0 #2563eb, 0 16px 34px rgb(31 51 58 / 9%);
+}
+
+.dashboard-entity-card.failed {
+  border-left-color: #d04437;
+}
+
+.dashboard-entity-card.rectification {
+  border-left-color: #5860c7;
+}
+
+.dashboard-entity-card.passed,
+.dashboard-entity-card.closed {
+  border-left-color: #22a35a;
+}
+
+.dashboard-entity-card h3 {
+  font-size: 17px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.dashboard-entity-card span,
+.dashboard-entity-meta span {
+  color: #66777d;
+  font-size: 12px;
+}
+
+.dashboard-entity-meta {
+  align-items: end;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: auto 1fr 1fr;
+}
+
+.dashboard-entity-meta strong {
+  color: var(--brand);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.dashboard-point-list {
+  border: 1px solid #dfe9e6;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.dashboard-point-row {
+  align-items: center;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #e7eeee;
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(240px, 1fr) minmax(150px, 0.6fr) minmax(120px, 0.5fr);
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.dashboard-point-row:hover {
+  background: #f8fbfa;
+}
+
+.dashboard-point-row:last-child {
+  border-bottom: 0;
+}
+
+.dashboard-point-row strong,
+.dashboard-point-row small {
+  display: block;
+}
+
+.dashboard-point-row em {
+  color: #263941;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .project-card-head {
   align-items: start;
   display: flex;
