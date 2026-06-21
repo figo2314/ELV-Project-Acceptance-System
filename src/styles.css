@@ -2372,7 +2372,7 @@ button.kpi-card.active {
 .excel-row {
   display: grid;
   gap: 0;
-  grid-template-columns: var(--admin-grid, 140px 280px 310px 104px 170px 96px 98px 68px);
+  grid-template-columns: var(--admin-grid, 140px 280px 310px 104px 170px 96px 132px 68px);
 }
 
 .excel-table.hide-project {

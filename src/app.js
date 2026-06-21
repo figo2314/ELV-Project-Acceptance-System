@@ -1494,7 +1494,7 @@ function getAdminTableColumns() {
     { key: "pointType", label: "Point Type", auto: "104px", min: 88, resizable: true },
     { key: "reference", label: t("reference"), auto: compactLocation ? "180px" : "170px", min: 140, resizable: true },
     { key: "assignee", label: t("assignee"), auto: "96px", min: 84, resizable: true },
-    { key: "status", label: t("status"), auto: "98px", min: 88, resizable: true },
+    { key: "status", label: t("status"), auto: "132px", min: 118, resizable: true },
     { key: "save", label: "", auto: "68px", min: 64, resizable: false }
   ];
 }
