@@ -368,6 +368,7 @@ function defaultState() {
     mediaFloor: "",
     mediaRoom: "",
     mediaSearch: "",
+    mediaCategoryFilter: "all",
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -1203,6 +1204,7 @@ function renderMediaPage() {
   const equipment = getFilteredMediaEquipment();
   const activeEquipment = equipment.find((item) => item.id === state.mediaEquipmentId) || equipment[0];
   const media = getEquipmentMedia(activeEquipment?.id);
+  const visibleMedia = getVisibleMediaForCategory(media);
   const records = state.data.records.filter((record) => record.equipmentId === activeEquipment?.id);
   return `
     <section class="media-workbench">
@@ -1227,11 +1229,11 @@ function renderMediaPage() {
                 </div>
                 <span class="badge ${activeEquipment.status || "pending"}">${statusLabel(activeEquipment.status || "pending")}</span>
               </div>
+              <div class="media-toolbar">
+                ${renderMediaCategoryFilter(media)}
+              </div>
               <form class="media-upload-card" data-media-form="${activeEquipment.id}">
-                <input type="hidden" name="category" value="drawing" />
-                <div class="media-type-grid">
-                  ${getMediaTypes().map((type, index) => `<button type="button" class="${index === 0 ? "active" : ""}" data-media-type="${type}">${t(type)}</button>`).join("")}
-                </div>
+                <input type="hidden" name="category" value="${escapeHtml(getUploadMediaCategory())}" />
                 <label>${t("mediaComments")}
                   <textarea name="comments" rows="3" placeholder="${t("commentPlaceholder")}"></textarea>
                 </label>
@@ -1241,8 +1243,10 @@ function renderMediaPage() {
                 </label>
                 <button class="primary" type="submit">${t("saveChanges")}</button>
               </form>
-              <div class="media-section-title">${t("attachments")} <span>${media.length}</span></div>
-              ${renderMediaTypeSections(media)}
+              <div class="media-section-title">${t("attachments")} <span>${visibleMedia.length}/${media.length}</span></div>
+              <div class="media-grid">
+                ${visibleMedia.map(renderMediaCard).join("") || `<div class="empty small">${t("noMedia")}</div>`}
+              </div>
               <div class="media-section-title">${t("comments")} <span>${records.filter((record) => record.comments).length}</span></div>
               <div class="media-comment-list">
                 ${records.filter((record) => record.comments).map(renderMediaComment).join("") || `<div class="empty small">${t("noRecord")}</div>`}
@@ -1316,25 +1320,25 @@ function renderMediaFilters() {
   `;
 }
 
-function renderMediaTypeSections(media) {
-  const types = getMediaTypes();
+function renderMediaCategoryFilter(media) {
+  const types = ["all", ...getMediaTypes()];
   return `
-    <div class="media-type-sections">
+    <div class="media-category-filter">
       ${types
         .map((type) => {
-          const items = media.filter((item) => (item.category || "document") === type);
-          return `
-            <section class="media-type-section">
-              <div class="media-section-title">${t(type)} <span>${items.length}</span></div>
-              <div class="media-grid">
-                ${items.map(renderMediaCard).join("") || `<div class="empty small">${t("noMedia")}</div>`}
-              </div>
-            </section>
-          `;
+          const count = type === "all" ? media.length : media.filter((item) => (item.category || "document") === type).length;
+          const active = (state.mediaCategoryFilter || "all") === type;
+          return `<button type="button" class="${active ? "active" : ""}" data-media-category="${type}">${type === "all" ? t("allNodes") : t(type)} <span>${count}</span></button>`;
         })
         .join("")}
     </div>
   `;
+}
+
+function getVisibleMediaForCategory(media) {
+  const category = state.mediaCategoryFilter || "all";
+  if (category === "all") return media;
+  return media.filter((item) => (item.category || "document") === category);
 }
 
 function getFilteredMediaEquipment() {
@@ -1359,6 +1363,11 @@ function getEquipmentMedia(equipmentId) {
 
 function getMediaTypes() {
   return ["drawing", "map", "locationPlan", "wiring", "photo", "document"];
+}
+
+function getUploadMediaCategory() {
+  const category = state.mediaCategoryFilter || "all";
+  return category === "all" ? "drawing" : category;
 }
 
 function getDemoMedia() {
@@ -2153,12 +2162,6 @@ function updateMediaFilter(key, value) {
   setState(patch);
 }
 
-function selectMediaType(button) {
-  const form = button.closest("[data-media-form]");
-  form.querySelectorAll("[data-media-type]").forEach((item) => item.classList.toggle("active", item === button));
-  form.querySelector("input[name='category']").value = button.dataset.mediaType || "document";
-}
-
 function bindMediaDropZone(zone) {
   const form = zone.closest("[data-media-form]");
   zone.addEventListener("dragover", (event) => {
@@ -2216,8 +2219,8 @@ function bindEvents() {
   document.querySelectorAll("[data-media-filter]").forEach((field) => {
     field.addEventListener(field.tagName === "INPUT" ? "input" : "change", () => updateMediaFilter(field.dataset.mediaFilter, field.value));
   });
-  document.querySelectorAll("[data-media-type]").forEach((button) => {
-    button.addEventListener("click", () => selectMediaType(button));
+  document.querySelectorAll("[data-media-category]").forEach((button) => {
+    button.addEventListener("click", () => setState({ mediaCategoryFilter: button.dataset.mediaCategory || "all" }));
   });
   document.querySelectorAll("[data-media-drop-zone]").forEach(bindMediaDropZone);
   document.querySelectorAll("[data-media-form]").forEach((form) => {
