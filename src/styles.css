@@ -1210,8 +1210,69 @@ textarea {
   display: none;
 }
 
-.field-add-point {
-  border-style: dashed;
+.field-add-point-trigger {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgb(23 79 111 / 8%), transparent 58%),
+    #fff;
+  border: 1px dashed #bdd1cd;
+  border-radius: 8px;
+  color: var(--brand);
+  display: grid;
+  gap: 2px 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 58px;
+  padding: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.field-add-point-trigger:hover {
+  background: #f8fbfa;
+  border-color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+
+.field-add-point-trigger span {
+  align-items: center;
+  background: var(--brand);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 20px;
+  font-weight: 900;
+  grid-row: 1 / span 2;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.field-add-point-trigger strong,
+.field-add-point-trigger small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-add-point-trigger small {
+  color: var(--muted);
+}
+
+.field-add-point-modal {
+  max-width: 560px;
+}
+
+.field-add-point-modal .field-add-point {
+  background: #fff;
+  border: 0;
+  border-radius: 0;
+  grid-template-columns: 1fr;
+  padding: 0;
+}
+
+.field-add-point-modal .field-add-point button {
+  min-height: 42px;
 }
 
 .attachment-dock {

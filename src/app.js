@@ -334,6 +334,7 @@ function defaultState() {
     adminColumnWidths: null,
     dashboardFilter: "all",
     selectedIssueId: "",
+    fieldAddPointOpen: false,
     importPreview: null,
     serverOnline: false,
     data: structuredClone(fallbackData)
@@ -418,6 +419,7 @@ function render() {
       ${renderTopbar()}
       ${state.view === "field" ? renderField() : renderAdmin()}
       ${renderIssueModal()}
+      ${renderFieldAddPointModal()}
       <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
     </main>
   `;
@@ -871,7 +873,11 @@ function renderFieldOperation() {
       <datalist id="comment-suggestions">${getCommentSuggestions().map((comment) => `<option value="${escapeHtml(comment)}"></option>`).join("")}</datalist>
       <div class="point-action-list">
         ${points.map((point) => renderPointActionRow(point)).join("")}
-        ${renderFieldAddPointForm(equipment)}
+        <button class="field-add-point-trigger" data-open-add-point>
+          <span>+</span>
+          <strong>${t("fieldAddPoint")}</strong>
+          <small>${escapeHtml(equipment.name)}</small>
+        </button>
       </div>
       ${selectedRecord ? renderAttachmentDock(selectedRecord) : ""}
     </div>
@@ -922,6 +928,30 @@ function renderFieldAddPointForm(equipment) {
       <input name="status" type="hidden" value="pending" />
       <button class="primary" type="submit">${t("fieldAddPoint")}</button>
     </form>
+  `;
+}
+
+function renderFieldAddPointModal() {
+  if (!state.fieldAddPointOpen) return "";
+  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  if (!equipment) return "";
+  return `
+    <div class="modal-backdrop" data-field-add-point-backdrop>
+      <section class="modal field-add-point-modal" role="dialog" aria-modal="true" aria-label="${t("fieldAddPoint")}" data-field-add-point-modal>
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">${t("selectedEquipment")}</p>
+            <h2>${t("fieldAddPoint")}</h2>
+            <small>${escapeHtml(equipment.name)}</small>
+          </div>
+          <button class="icon-btn" data-close-add-point title="${t("close")}">X</button>
+        </div>
+        <div class="modal-block">
+          <p>Add a temporary site point when the installed item is missing from the schedule.</p>
+        </div>
+        ${renderFieldAddPointForm(equipment)}
+      </section>
+    </div>
   `;
 }
 
@@ -1640,12 +1670,25 @@ function closeIssueDetail() {
   setState({ selectedIssueId: "" });
 }
 
+function openFieldAddPointModal() {
+  setState({ fieldAddPointOpen: true });
+}
+
+function closeFieldAddPointModal() {
+  setState({ fieldAddPointOpen: false });
+}
+
 function goToIssuesPage() {
   setState({ adminPage: "issues", selectedIssueId: "" });
 }
 
 function handleModalBackdrop(event) {
-  if (event.target === event.currentTarget) closeIssueDetail();
+  if (event.target !== event.currentTarget) return;
+  if (event.currentTarget.dataset.fieldAddPointBackdrop !== undefined) {
+    closeFieldAddPointModal();
+    return;
+  }
+  closeIssueDetail();
 }
 
 function stopModalClick(event) {
@@ -1653,15 +1696,20 @@ function stopModalClick(event) {
 }
 
 function handleEscapeKey(event) {
-  if (event.key === "Escape" && state.selectedIssueId) closeIssueDetail();
+  if (event.key !== "Escape") return;
+  if (state.fieldAddPointOpen) {
+    closeFieldAddPointModal();
+    return;
+  }
+  if (state.selectedIssueId) closeIssueDetail();
 }
 
 function setAdminPage(page) {
-  setState({ adminPage: page, selectedIssueId: "", dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all" });
+  setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all" });
 }
 
 function setView(view) {
-  setState({ view, selectedIssueId: "" });
+  setState({ view, selectedIssueId: "", fieldAddPointOpen: false });
 }
 
 function setDashboardFilter(filter) {
@@ -1684,9 +1732,16 @@ function bindIssueDetailEvents() {
   document.querySelectorAll("[data-close-modal]").forEach((button) => {
     button.addEventListener("click", closeIssueDetail);
   });
+  document.querySelector("[data-open-add-point]")?.addEventListener("click", openFieldAddPointModal);
+  document.querySelectorAll("[data-close-add-point]").forEach((button) => {
+    button.addEventListener("click", closeFieldAddPointModal);
+  });
   document.querySelector("[data-go-issues]")?.addEventListener("click", goToIssuesPage);
   document.querySelector("[data-modal]")?.addEventListener("click", stopModalClick);
-  document.querySelector(".modal-backdrop")?.addEventListener("click", handleModalBackdrop);
+  document.querySelector("[data-field-add-point-modal]")?.addEventListener("click", stopModalClick);
+  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
+    backdrop.addEventListener("click", handleModalBackdrop);
+  });
   window.removeEventListener("keydown", handleEscapeKey);
   window.addEventListener("keydown", handleEscapeKey);
 }
@@ -2196,7 +2251,13 @@ async function saveFieldPoint(event) {
     const point = response.points.find((item) => item.equipmentId === payload.equipmentId && item.name === payload.name) || response.points.find((item) => item.id === payload.id);
     const record = response.records.find((item) => item.pointId === point?.id);
     setData(response);
-    setState({ selectedEquipmentId: payload.equipmentId, selectedPointId: point?.id || state.selectedPointId, selectedRecordId: record?.id || state.selectedRecordId, toast: t("pointSaved") });
+    setState({
+      selectedEquipmentId: payload.equipmentId,
+      selectedPointId: point?.id || state.selectedPointId,
+      selectedRecordId: record?.id || state.selectedRecordId,
+      fieldAddPointOpen: false,
+      toast: t("pointSaved")
+    });
     window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch {
     flash(t("serverOffline"));
