@@ -1115,9 +1115,9 @@ function renderDashboardHero() {
         <span>${metrics.passed}/${metrics.total} ${t("inspectedQty")}</span>
       </div>
       <div class="hero-kpis">
-        ${renderKpi(t("totalProjects"), metrics.projects)}
-        ${renderKpi(t("totalEquipment"), metrics.equipment)}
-        ${renderKpi(t("totalPoints"), metrics.points)}
+        ${renderKpi(t("totalProjects"), metrics.projects, "", "projects")}
+        ${renderKpi(t("totalEquipment"), metrics.equipment, "", "equipment")}
+        ${renderKpi(t("totalPoints"), metrics.points, "", "points")}
         ${renderKpi(t("issueQty"), metrics.issues, "danger", "issues")}
         ${renderKpi(t("unassigned"), metrics.unassigned, metrics.unassigned ? "warn" : "", "unassigned")}
         ${renderKpi(t("overdue"), metrics.overdue, metrics.overdue ? "danger" : "", "overdue")}
@@ -1272,15 +1272,41 @@ function renderAttentionHeader() {
 
 function getDashboardDrilldownRecords() {
   const filter = state.dashboardFilter || "all";
+  if (filter === "projects") return getProjectDrilldownRecords();
+  if (filter === "equipment") return getEquipmentDrilldownRecords();
+  if (filter === "points") return [...state.data.records].sort(compareIssuePriority);
   if (filter === "issues") return getOpenIssueRecords().filter((record) => ["failed", "rectification"].includes(record.status));
   if (filter === "unassigned") return getOpenIssueRecords().filter((record) => !record.assignee);
   if (filter === "overdue") return getOpenIssueRecords().filter(isRecordOverdue);
   return getOpenIssueRecords();
 }
 
+function getProjectDrilldownRecords() {
+  return state.data.projects
+    .flatMap((project) => {
+      const records = state.data.records.filter((record) => record.projectId === project.id);
+      const open = records.filter((record) => ["failed", "rectification", "pending"].includes(record.status));
+      return (open.length ? open : records).sort(compareIssuePriority).slice(0, 3);
+    })
+    .sort(compareIssuePriority);
+}
+
+function getEquipmentDrilldownRecords() {
+  return state.data.equipment
+    .flatMap((equipment) => {
+      const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
+      const open = records.filter((record) => ["failed", "rectification", "pending"].includes(record.status));
+      return (open.length ? open : records).sort(compareIssuePriority).slice(0, 2);
+    })
+    .sort(compareIssuePriority);
+}
+
 function getDashboardFilterMeta(filter) {
   const labels = {
     all: t("allAttention"),
+    projects: t("totalProjects"),
+    equipment: t("totalEquipment"),
+    points: t("totalPoints"),
     issues: t("issueQty"),
     unassigned: t("unassigned"),
     overdue: t("overdue")
