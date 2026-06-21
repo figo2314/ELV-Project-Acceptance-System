@@ -1528,9 +1528,30 @@ function renderDataRow(row) {
       <input name="pointType" value="${escapeHtml(row.point.type)}" title="${escapeHtml(row.point.type)}" />
       <input name="reference" value="${escapeHtml(row.point.reference || "")}" title="${escapeHtml(row.point.reference || "")}" />
       <input name="assignee" value="${escapeHtml(row.record.assignee || "")}" title="${escapeHtml(row.record.assignee || "")}" />
-      <select class="status-select ${row.record.status}" name="status" title="${statusLabel(row.record.status)}">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), row.record.status)).join("")}</select>
+      ${renderStatusPicker(row.record.status)}
       <button class="ghost" type="submit">${t("saveChanges")}</button>
     </form>
+  `;
+}
+
+function renderStatusPicker(currentStatus) {
+  const statuses = ["pending", "passed", "failed", "rectification", "closed"];
+  return `
+    <div class="status-picker ${currentStatus}" data-status-picker>
+      <input type="hidden" name="status" value="${escapeHtml(currentStatus)}" />
+      <button type="button" class="status-picker-button ${currentStatus}" data-status-toggle title="${statusLabel(currentStatus)}">
+        <span>${statusLabel(currentStatus)}</span>
+        <i>⌄</i>
+      </button>
+      <div class="status-picker-menu">
+        ${statuses.map((status) => `
+          <button type="button" class="${status === currentStatus ? "active" : ""}" data-status-choice="${status}">
+            <span class="status-dot ${status}"></span>
+            <strong>${statusLabel(status)}</strong>
+          </button>
+        `).join("")}
+      </div>
+    </div>
   `;
 }
 
@@ -1841,9 +1862,7 @@ function bindEvents() {
   document.querySelectorAll("[data-row-editor]").forEach((form) => {
     form.addEventListener("submit", saveDataRow);
   });
-  document.querySelectorAll(".status-select").forEach((select) => {
-    select.addEventListener("change", () => setStatusSelectTone(select));
-  });
+  bindStatusPickers();
   document.querySelectorAll("[data-field-point-editor]").forEach((form) => {
     form.addEventListener("submit", saveFieldPoint);
   });
@@ -2072,9 +2091,43 @@ function updateAdminSearch(value) {
   }, 350);
 }
 
-function setStatusSelectTone(select) {
-  select.classList.remove("pending", "passed", "failed", "rectification", "closed");
-  select.classList.add(select.value || "pending");
+function bindStatusPickers() {
+  document.querySelectorAll("[data-status-toggle]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const picker = button.closest("[data-status-picker]");
+      const isOpen = picker?.classList.contains("open");
+      closeStatusPickers();
+      if (!isOpen) picker?.classList.add("open");
+    });
+  });
+  document.querySelectorAll("[data-status-choice]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setStatusPickerValue(button.closest("[data-status-picker]"), button.dataset.statusChoice);
+    });
+  });
+  document.addEventListener("click", closeStatusPickers, { once: true });
+}
+
+function setStatusPickerValue(picker, status) {
+  if (!picker || !status) return;
+  const input = picker.querySelector("input[name='status']");
+  const button = picker.querySelector("[data-status-toggle]");
+  input.value = status;
+  picker.className = `status-picker ${status}`;
+  button.className = `status-picker-button ${status}`;
+  button.title = statusLabel(status);
+  button.querySelector("span").textContent = statusLabel(status);
+  picker.querySelectorAll("[data-status-choice]").forEach((choice) => {
+    choice.classList.toggle("active", choice.dataset.statusChoice === status);
+  });
+}
+
+function closeStatusPickers() {
+  document.querySelectorAll("[data-status-picker].open").forEach((picker) => picker.classList.remove("open"));
 }
 
 async function saveInspection(event) {

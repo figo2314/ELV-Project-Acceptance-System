@@ -2510,48 +2510,129 @@ button.kpi-card.active {
   z-index: 6;
 }
 
-.status-select {
-  background-color: #fff7df;
+.status-picker {
+  align-items: center;
+  background: #fff;
+  display: flex;
+  overflow: visible;
+  padding: 5px 7px;
+  position: relative;
+}
+
+.excel-row:not(.excel-head):hover > .status-picker {
+  background: #f8fbfa;
+}
+
+.status-picker-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 7px;
+  height: 28px;
+  justify-content: space-between;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 8px 0 10px;
+  width: 100%;
+}
+
+.status-picker-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-picker-button i {
+  font-style: normal;
+  font-weight: 900;
+  opacity: 0.82;
+}
+
+.status-picker-button.pending {
+  background: #fff4c7;
+  border-color: #f5d980;
   color: #7b4b00;
-  font-weight: 850;
-  padding-right: 24px;
 }
 
-.status-select.passed,
-.status-select.closed {
-  background-color: #16864b;
-  color: #fff;
+.status-picker-button.passed,
+.status-picker-button.closed {
+  background: #dcfce7;
+  border-color: #9ee6b7;
+  color: #166534;
 }
 
-.status-select.failed {
-  background-color: #b93a2f;
-  color: #fff;
+.status-picker-button.failed {
+  background: #fee2e2;
+  border-color: #f3b4b4;
+  color: #991b1b;
 }
 
-.status-select.rectification {
-  background-color: #f59e0b;
-  color: #3b2600;
+.status-picker-button.rectification {
+  background: #ffedd5;
+  border-color: #fdba74;
+  color: #9a3412;
 }
 
-.excel-row:not(.excel-head):hover > .status-select.passed,
-.excel-row:not(.excel-head):hover > .status-select.closed {
-  background-color: #16864b;
-  color: #fff;
+.status-picker-menu {
+  background: #fff;
+  border: 1px solid #dbe7e4;
+  border-radius: 10px;
+  box-shadow: 0 18px 42px rgb(16 56 79 / 18%);
+  display: none;
+  gap: 4px;
+  left: 6px;
+  min-width: 156px;
+  padding: 6px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 30;
 }
 
-.excel-row:not(.excel-head):hover > .status-select.failed {
-  background-color: #b93a2f;
-  color: #fff;
+.status-picker.open .status-picker-menu {
+  display: grid;
 }
 
-.excel-row:not(.excel-head):hover > .status-select.rectification {
-  background-color: #f59e0b;
-  color: #3b2600;
+.status-picker-menu button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #334155;
+  display: flex;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 8px;
+  text-align: left;
 }
 
-.excel-row:not(.excel-head):hover > .status-select.pending {
-  background-color: #fff7df;
-  color: #7b4b00;
+.status-picker-menu button:hover,
+.status-picker-menu button.active {
+  background: #f1f6f5;
+}
+
+.status-dot {
+  border-radius: 999px;
+  display: inline-block;
+  height: 9px;
+  width: 9px;
+}
+
+.status-dot.pending {
+  background: #d8a000;
+}
+
+.status-dot.passed,
+.status-dot.closed {
+  background: #16864b;
+}
+
+.status-dot.failed {
+  background: #b93a2f;
+}
+
+.status-dot.rectification {
+  background: #f59e0b;
 }
 
 .excel-row > span {
