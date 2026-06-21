@@ -427,7 +427,8 @@ function render() {
 
 function renderTopbar() {
   const pendingSync = state.data.records.filter((record) => record.sync === "pending").length;
-  const onlineText = navigator.onLine && state.serverOnline ? t("online") : t("offline");
+  const isOnline = navigator.onLine && state.serverOnline;
+  const syncText = pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced");
   return `
     <header class="topbar">
       <div class="topbar-brand">
@@ -435,7 +436,13 @@ function renderTopbar() {
       </div>
       ${state.view === "admin" ? `<nav class="top-nav">${renderAdminNavItem("dashboard", t("navDashboard"))}${renderAdminNavItem("data", t("navData"))}${renderAdminNavItem("import", t("navImport"))}${renderAdminNavItem("issues", t("navIssues"))}${renderAdminNavItem("people", t("navPeople"))}</nav>` : ""}
       <div class="topbar-actions">
-        <span class="sync-pill">${onlineText} / ${pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced")}</span>
+        <span class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}">
+          <i></i>
+          <span>
+            <strong>${isOnline ? t("online") : t("offline")}</strong>
+            <small>${syncText}</small>
+          </span>
+        </span>
         <div class="actions">
           <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
           <button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>

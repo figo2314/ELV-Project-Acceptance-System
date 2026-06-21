@@ -144,15 +144,79 @@ button {
 }
 
 .sync-pill {
-  background: var(--panel-soft);
-  border: 1px solid #e1ebe9;
+  align-items: center;
+  background: #f8fbfa;
+  border: 1px solid #dbe5e2;
   border-radius: 999px;
-  color: #43545b;
+  box-shadow: 0 8px 18px rgb(31 51 58 / 7%);
+  color: #334155;
+  display: inline-flex;
   flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 800;
-  padding: 8px 10px;
+  gap: 9px;
+  min-height: 42px;
+  padding: 6px 12px 6px 9px;
   white-space: nowrap;
+}
+
+.sync-pill i {
+  border-radius: 999px;
+  box-shadow: 0 0 0 5px rgb(148 163 184 / 16%);
+  display: inline-block;
+  height: 12px;
+  width: 12px;
+}
+
+.sync-pill span {
+  display: grid;
+  gap: 1px;
+}
+
+.sync-pill strong {
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.sync-pill small {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.sync-pill.online {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.sync-pill.online i {
+  background: #10b981;
+  box-shadow: 0 0 0 5px rgb(16 185 129 / 16%);
+}
+
+.sync-pill.offline {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #9f1239;
+}
+
+.sync-pill.offline i {
+  background: #e11d48;
+  box-shadow: 0 0 0 5px rgb(225 29 72 / 14%);
+}
+
+.sync-pill.pending-sync {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.sync-pill.pending-sync i {
+  background: #f59e0b;
+  box-shadow: 0 0 0 5px rgb(245 158 11 / 16%);
 }
 
 .icon-btn,
