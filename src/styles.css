@@ -947,8 +947,7 @@ textarea {
   gap: 7px;
 }
 
-.mobile-path-trail span,
-.mobile-path-trail.empty strong {
+.mobile-path-trail span {
   align-items: center;
   background: #f6faf9;
   border: 1px solid #e3ecea;
@@ -972,6 +971,31 @@ textarea {
   font-size: 10px;
   height: 18px;
   justify-content: center;
+}
+
+.mobile-path-hint {
+  align-items: center;
+  background: #f7faf9;
+  border: 1px solid #e4eeeb;
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.mobile-path-hint span {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mobile-path-hint strong {
+  color: #43545b;
+  font-size: 12px;
 }
 
 .mobile-drill-list {

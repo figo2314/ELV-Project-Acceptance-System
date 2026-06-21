@@ -625,8 +625,8 @@ function renderFieldMobileBreadcrumb(path) {
   const chips = getFieldMobileBreadcrumbItems(path);
   if (!chips.length) {
     return `
-      <div class="mobile-path-trail empty">
-        <small>Current path</small>
+      <div class="mobile-path-hint">
+        <span>Current path</span>
         <strong>Select a project to start</strong>
       </div>
     `;
