@@ -578,10 +578,9 @@ function renderFieldMobileDetailNav() {
 function renderFieldMobileBackButton(level, path) {
   if (level === "project") {
     return `
-      <button class="mobile-back-action disabled" disabled>
-        <span class="mobile-back-arrow">&larr;</span>
+      <div class="mobile-level-label">
         <span><small>Start level</small><strong>${t("project")}</strong></span>
-      </button>
+      </div>
     `;
   }
   return `
