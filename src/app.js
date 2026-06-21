@@ -96,6 +96,19 @@ const dictionary = {
     navImport: "Import & Sync",
     navIssues: "Issues",
     navPeople: "People",
+    navMedia: "Drawings & Media",
+    mediaLibrary: "Equipment Media Library",
+    mediaType: "Media Type",
+    mediaComments: "Media Comments",
+    uploadMedia: "Upload Media",
+    noMedia: "No drawings, photos or documents attached to this equipment",
+    mediaSaved: "Media saved",
+    drawing: "Drawing",
+    map: "Map",
+    locationPlan: "Location Plan",
+    wiring: "Wiring Diagram",
+    photo: "Photo",
+    document: "Document",
     portfolioHealth: "Portfolio Health",
     totalProjects: "Projects",
     totalEquipment: "Equipment",
@@ -225,6 +238,19 @@ const dictionary = {
     navImport: "導入與同步",
     navIssues: "問題",
     navPeople: "人員",
+    navMedia: "圖紙與媒體",
+    mediaLibrary: "設備媒體庫",
+    mediaType: "媒體類型",
+    mediaComments: "媒體備註",
+    uploadMedia: "上傳媒體",
+    noMedia: "此設備暫無圖紙、照片或文件",
+    mediaSaved: "媒體已保存",
+    drawing: "圖紙",
+    map: "地圖",
+    locationPlan: "位置圖",
+    wiring: "接線圖",
+    photo: "照片",
+    document: "文件",
     portfolioHealth: "項目健康度",
     totalProjects: "項目",
     totalEquipment: "設備",
@@ -275,6 +301,7 @@ const fallbackData = {
   locations: [{ id: "l1", projectId: "p1", name: "Tower A / 12F / AHU Room" }],
   equipment: [{ id: "e1", projectId: "p1", locationId: "l1", team: "BMS", name: "DDC-12F-AHU-01", type: "DDC Panel", status: "pending" }],
   points: [{ id: "pt1", equipmentId: "e1", name: "BACnet/IP communication", type: "Network", reference: "Online", status: "pending" }],
+  media: [],
   records: [
     {
       id: "r1",
@@ -334,6 +361,7 @@ function defaultState() {
     adminColumnWidths: null,
     dashboardFilter: "all",
     dashboardEntityId: "",
+    mediaEquipmentId: "e1",
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -398,6 +426,7 @@ function setData(data) {
 }
 
 function normalizeSelection(data) {
+  data.media = Array.isArray(data.media) ? data.media : [];
   const project = data.projects.find((item) => item.id === state.selectedProjectId) || data.projects[0];
   const location = data.locations.find((item) => item.id === state.selectedLocationId && item.projectId === project?.id) || data.locations.find((item) => item.projectId === project?.id);
   const locationEquipment = data.equipment.filter((item) => item.locationId === location?.id);
@@ -437,7 +466,7 @@ function renderTopbar() {
       <div class="topbar-brand">
         <div class="brand-row"><span class="logo-mark">${t("logoText")}</span><h1>${t("appName")}</h1></div>
       </div>
-      ${state.view === "admin" ? `<nav class="top-nav">${renderAdminNavItem("dashboard", t("navDashboard"))}${renderAdminNavItem("data", t("navData"))}${renderAdminNavItem("import", t("navImport"))}${renderAdminNavItem("issues", t("navIssues"))}${renderAdminNavItem("people", t("navPeople"))}</nav>` : ""}
+      ${state.view === "admin" ? `<nav class="top-nav">${renderAdminNavItem("dashboard", t("navDashboard"))}${renderAdminNavItem("data", t("navData"))}${renderAdminNavItem("media", t("navMedia"))}${renderAdminNavItem("import", t("navImport"))}${renderAdminNavItem("issues", t("navIssues"))}${renderAdminNavItem("people", t("navPeople"))}</nav>` : ""}
       <div class="topbar-actions">
         <span class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}">
           <i></i>
@@ -1088,6 +1117,7 @@ function renderAdminPage() {
       </section>
     `;
   }
+  if (state.adminPage === "media") return renderMediaPage();
   if (state.adminPage === "import") return renderImportPage();
   if (state.adminPage === "issues") return renderIssuesPage();
   if (state.adminPage === "people") return renderPeoplePage();
@@ -1160,6 +1190,103 @@ function renderDashboardPrimaryPanel() {
   return `
     <div class="section-title">${filter === "projects" ? meta.label : t("projectRank")}</div>
     ${state.data.projects.map(renderProjectSummary).join("")}
+  `;
+}
+
+function renderMediaPage() {
+  const equipment = state.data.equipment;
+  const activeEquipment = equipment.find((item) => item.id === state.mediaEquipmentId) || equipment[0];
+  const media = (state.data.media || []).filter((item) => item.equipmentId === activeEquipment?.id);
+  const records = state.data.records.filter((record) => record.equipmentId === activeEquipment?.id);
+  return `
+    <section class="media-workbench">
+      <aside class="panel media-device-panel">
+        <div class="section-title">${t("equipment")}</div>
+        <div class="media-device-list">
+          ${equipment.map((item) => renderMediaEquipmentButton(item, activeEquipment?.id)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
+        </div>
+      </aside>
+      <section class="panel media-detail-panel">
+        ${
+          activeEquipment
+            ? `
+              <div class="media-detail-head">
+                <div>
+                  <p class="eyebrow">${t("mediaLibrary")}</p>
+                  <h2>${escapeHtml(activeEquipment.name)}</h2>
+                  <span>${escapeHtml(activeEquipment.type)} &middot; ${escapeHtml(getLocationName(activeEquipment.locationId))}</span>
+                </div>
+                <span class="badge ${activeEquipment.status || "pending"}">${statusLabel(activeEquipment.status || "pending")}</span>
+              </div>
+              <form class="media-upload-card" data-media-form="${activeEquipment.id}">
+                <label>${t("mediaType")}
+                  <select name="category">
+                    ${["drawing", "map", "locationPlan", "wiring", "photo", "document"].map((type) => option(type, t(type), "drawing")).join("")}
+                  </select>
+                </label>
+                <label>${t("mediaComments")}
+                  <textarea name="comments" rows="3" placeholder="${t("commentPlaceholder")}"></textarea>
+                </label>
+                <label class="file-button">${t("uploadMedia")}
+                  <input name="mediaFiles" type="file" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple />
+                </label>
+                <button class="primary" type="submit">${t("saveChanges")}</button>
+              </form>
+              <div class="media-section-title">${t("attachments")} <span>${media.length}</span></div>
+              <div class="media-grid">
+                ${media.map(renderMediaCard).join("") || `<div class="empty small">${t("noMedia")}</div>`}
+              </div>
+              <div class="media-section-title">${t("comments")} <span>${records.filter((record) => record.comments).length}</span></div>
+              <div class="media-comment-list">
+                ${records.filter((record) => record.comments).map(renderMediaComment).join("") || `<div class="empty small">${t("noRecord")}</div>`}
+              </div>
+            `
+            : `<div class="empty">${t("noEquipment")}</div>`
+        }
+      </section>
+    </section>
+  `;
+}
+
+function renderMediaEquipmentButton(equipment, activeId) {
+  const mediaCount = (state.data.media || []).filter((item) => item.equipmentId === equipment.id).length;
+  const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
+  const commentCount = records.filter((record) => record.comments).length;
+  return `
+    <button class="media-device ${equipment.id === activeId ? "active" : ""}" data-media-equipment="${equipment.id}">
+      <span>
+        <strong>${escapeHtml(equipment.name)}</strong>
+        <small>${escapeHtml(equipment.type)} &middot; ${escapeHtml(getCompactLocationName(equipment.locationId))}</small>
+      </span>
+      <em>${mediaCount} ${t("attachments")} / ${commentCount} ${t("comments")}</em>
+    </button>
+  `;
+}
+
+function renderMediaCard(item) {
+  const file = item.file || {};
+  const hasFile = Boolean(item.file);
+  return `
+    <article class="media-card">
+      <div class="media-thumb">${hasFile ? renderAttachmentThumb(file) : `<span>${t("mediaComments")}</span>`}</div>
+      <div>
+        <span class="badge">${t(item.category || "document")}</span>
+        <strong>${escapeHtml(file.name || t("attachments"))}</strong>
+        <small>${escapeHtml(formatDateTime(item.createdAt) || item.createdAt || "")}</small>
+      </div>
+      ${item.comments ? `<p>${escapeHtml(item.comments)}</p>` : ""}
+    </article>
+  `;
+}
+
+function renderMediaComment(record) {
+  const point = state.data.points.find((item) => item.id === record.pointId);
+  return `
+    <article class="media-comment">
+      <strong>${escapeHtml(point?.name || record.title)}</strong>
+      <p>${escapeHtml(record.comments || "")}</p>
+      <small>${escapeHtml(record.updatedAt || formatDateTime(record.serverUpdatedAt) || "")}</small>
+    </article>
   `;
 }
 
@@ -1876,6 +2003,12 @@ function bindEvents() {
   document.querySelectorAll("[data-admin-page]").forEach((button) => {
     button.addEventListener("click", () => setAdminPage(button.dataset.adminPage));
   });
+  document.querySelectorAll("[data-media-equipment]").forEach((button) => {
+    button.addEventListener("click", () => setState({ mediaEquipmentId: button.dataset.mediaEquipment }));
+  });
+  document.querySelectorAll("[data-media-form]").forEach((form) => {
+    form.addEventListener("submit", saveMedia);
+  });
   document.querySelectorAll("[data-admin-project]").forEach((button) => {
     button.addEventListener("click", () => selectAdminProject(button.dataset.adminProject));
   });
@@ -2449,6 +2582,28 @@ async function saveFieldPoint(event) {
       fieldAddPointOpen: false,
       toast: t("pointSaved")
     });
+    window.setTimeout(() => setState({ toast: "" }), 1800);
+  } catch {
+    flash(t("serverOffline"));
+  }
+}
+
+async function saveMedia(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const equipmentId = form.dataset.mediaForm;
+  const files = [...form.mediaFiles.files];
+  if (!files.length && !form.comments.value.trim()) return;
+  try {
+    const uploaded = files.length ? await apiPost("/attachments", { files: await filesToDataUrls(files) }) : { files: [] };
+    const response = await apiPost("/admin/media", {
+      equipmentId,
+      category: form.category.value,
+      comments: form.comments.value,
+      files: uploaded.files || []
+    });
+    setData(response);
+    setState({ mediaEquipmentId: equipmentId, toast: t("mediaSaved") });
     window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch {
     flash(t("serverOffline"));

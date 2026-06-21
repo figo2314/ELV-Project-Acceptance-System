@@ -197,6 +197,47 @@ app.post("/api/admin/project", async (request, response) => {
   response.json(result);
 });
 
+app.post("/api/admin/media", async (request, response) => {
+  const body = request.body || {};
+  const result = await withDbMutation(async (db) => {
+    db.media = Array.isArray(db.media) ? db.media : [];
+    const equipment = db.equipment.find((item) => item.id === body.equipmentId);
+    if (!equipment) return mutationError(404, "Equipment not found.");
+    const files = Array.isArray(body.files) ? body.files : [];
+    const comments = String(body.comments || "").trim();
+    if (!files.length && !comments) return mutationError(400, "Media file or comment is required.");
+    const createdAt = new Date().toISOString();
+    if (files.length) {
+      for (const file of files) {
+        db.media.push({
+          id: createId("m"),
+          equipmentId: equipment.id,
+          projectId: equipment.projectId,
+          locationId: equipment.locationId,
+          category: String(body.category || "document").trim() || "document",
+          comments,
+          file,
+          createdAt
+        });
+      }
+    } else {
+      db.media.push({
+        id: createId("m"),
+        equipmentId: equipment.id,
+        projectId: equipment.projectId,
+        locationId: equipment.locationId,
+        category: String(body.category || "document").trim() || "document",
+        comments,
+        file: null,
+        createdAt
+      });
+    }
+    return db;
+  });
+  if (sendMutationError(response, result)) return;
+  response.json(result);
+});
+
 app.post("/api/admin/row", async (request, response) => {
   const body = request.body || {};
   const result = await withDbMutation(async (db) => {
@@ -391,10 +432,12 @@ async function readDb() {
   await dbWriteQueue.catch(() => {});
   await mkdir(dataDir, { recursive: true });
   if (!existsSync(dbPath)) {
-    await writeFile(dbPath, `${JSON.stringify({ version: 1, projects: [], locations: [], equipment: [], points: [], records: [] }, null, 2)}\n`);
+    await writeFile(dbPath, `${JSON.stringify({ version: 1, projects: [], locations: [], equipment: [], points: [], media: [], records: [] }, null, 2)}\n`);
   }
   const content = await readFile(dbPath, "utf8");
-  return JSON.parse(content.replace(/^\uFEFF/, ""));
+  const db = JSON.parse(content.replace(/^\uFEFF/, ""));
+  db.media = Array.isArray(db.media) ? db.media : [];
+  return db;
 }
 
 async function writeDb(db) {
