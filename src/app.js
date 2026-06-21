@@ -331,6 +331,7 @@ let state = loadState();
 let adminSearchTimer = null;
 let pendingMediaUploadFiles = [];
 let pendingMediaUploadDraft = {};
+let mediaUploadSaving = false;
 
 init();
 
@@ -1009,6 +1010,7 @@ function renderMediaUploadModal() {
   const title = pendingMediaUploadDraft.title ?? (pendingMediaUploadFiles[0] ? stripFileExtension(pendingMediaUploadFiles[0].name) : "");
   const reference = pendingMediaUploadDraft.reference || "";
   const comments = pendingMediaUploadDraft.comments || "";
+  const totalSize = getTotalFileSize(pendingMediaUploadFiles);
   return `
     <div class="modal-backdrop" data-media-upload-backdrop>
       <section class="modal media-upload-modal" role="dialog" aria-modal="true" aria-label="${t("uploadMedia")}" data-media-upload-modal>
@@ -1018,9 +1020,14 @@ function renderMediaUploadModal() {
             <h2>${escapeHtml(equipment.name)}</h2>
             <small>${escapeHtml(equipment.type)} &middot; ${escapeHtml(getLocationName(equipment.locationId))}</small>
           </div>
-          <button class="icon-btn" data-close-media-upload title="${t("close")}">X</button>
+          <button class="icon-btn" data-close-media-upload title="${t("close")}" ${mediaUploadSaving ? "disabled" : ""}>X</button>
         </div>
         <form class="media-upload-form" data-media-upload-form="${equipment.id}">
+          <div class="media-upload-summary">
+            <span><strong>${pendingMediaUploadFiles.length}</strong> file(s)</span>
+            <span><strong>${formatFileSize(totalSize)}</strong> selected</span>
+            <span><strong>${formatFileSize(MEDIA_UPLOAD_LIMIT_BYTES)}</strong> max per upload</span>
+          </div>
           <div class="media-type-grid">
             ${getMediaTypes()
               .map(
@@ -1045,16 +1052,19 @@ function renderMediaUploadModal() {
             <textarea name="comments" rows="4" placeholder="${t("commentPlaceholder")}">${escapeHtml(comments)}</textarea>
           </label>
           <label class="media-modal-drop" data-media-modal-drop="${equipment.id}">
-            <strong>${pendingMediaUploadFiles.length ? `${pendingMediaUploadFiles.length} file(s) ready` : "Drop files here or click to choose"}</strong>
-            <span>PDF, image, DWG/DXF, Word or Excel files are supported.</span>
+            <strong>${pendingMediaUploadFiles.length ? "Files ready for review" : "Drop files here or click to choose"}</strong>
+            <span>${pendingMediaUploadFiles.length ? "Drop again to replace the current selection." : "PDF, image, DWG/DXF, Word or Excel files are supported."}</span>
             <input name="mediaFiles" type="file" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple />
           </label>
           <div class="media-file-list">
-            ${pendingMediaUploadFiles.map(renderPendingMediaFile).join("") || `<div class="empty small">No files selected yet. You can also save a comment-only media note.</div>`}
+            ${pendingMediaUploadFiles.map((file, index) => renderPendingMediaFile(file, index)).join("") || `<div class="empty small">No files selected yet. You can also save a comment-only media note.</div>`}
           </div>
           <div class="modal-actions">
-            <button class="ghost" type="button" data-close-media-upload>${t("close")}</button>
-            <button class="primary" type="submit">${t("saveChanges")}</button>
+            <button class="ghost" type="button" data-close-media-upload ${mediaUploadSaving ? "disabled" : ""}>${t("close")}</button>
+            <button class="primary media-save-button" type="submit" ${mediaUploadSaving ? "disabled" : ""}>
+              <span class="button-spinner" aria-hidden="true"></span>
+              ${mediaUploadSaving ? "Uploading..." : t("saveChanges")}
+            </button>
           </div>
         </form>
       </section>
@@ -1062,12 +1072,13 @@ function renderMediaUploadModal() {
   `;
 }
 
-function renderPendingMediaFile(file) {
+function renderPendingMediaFile(file, index) {
   return `
     <div class="media-file-row">
       <span>${getFileIcon(file)}</span>
       <strong>${escapeHtml(file.name)}</strong>
       <small>${escapeHtml(file.type || "File")} &middot; ${formatFileSize(file.size)}</small>
+      <button type="button" class="media-file-remove" data-media-remove-file="${index}" aria-label="Remove ${escapeHtml(file.name)}">X</button>
     </div>
   `;
 }
@@ -2197,8 +2208,10 @@ function openMediaUploadModal(equipmentId, files = []) {
 }
 
 function closeMediaUploadModal() {
+  if (mediaUploadSaving) return;
   pendingMediaUploadFiles = [];
   pendingMediaUploadDraft = {};
+  mediaUploadSaving = false;
   setState({ mediaUploadOpen: false, mediaUploadEquipmentId: "" });
 }
 
@@ -2317,6 +2330,12 @@ function bindMediaModalDropZone(zone) {
   });
 }
 
+function removePendingMediaFile(fileIndex, sourceElement) {
+  pendingMediaUploadDraft = readMediaUploadDraft(sourceElement);
+  pendingMediaUploadFiles = pendingMediaUploadFiles.filter((_file, index) => index !== fileIndex);
+  render();
+}
+
 function readMediaUploadDraft(element) {
   const form = element.closest("[data-media-upload-form]");
   if (!form) return pendingMediaUploadDraft;
@@ -2387,6 +2406,9 @@ function bindEvents() {
     input.addEventListener("change", () => openMediaUploadModal(input.dataset.mediaFilePicker, input.files || []));
   });
   document.querySelectorAll("[data-media-modal-drop]").forEach(bindMediaModalDropZone);
+  document.querySelectorAll("[data-media-remove-file]").forEach((button) => {
+    button.addEventListener("click", () => removePendingMediaFile(Number(button.dataset.mediaRemoveFile), button));
+  });
   document.querySelectorAll("[data-media-upload-form]").forEach((form) => {
     form.addEventListener("submit", saveMedia);
   });
@@ -2971,6 +2993,7 @@ async function saveFieldPoint(event) {
 
 async function saveMedia(event) {
   event.preventDefault();
+  if (mediaUploadSaving) return;
   const form = event.currentTarget;
   const equipmentId = form.dataset.mediaUploadForm;
   const payload = Object.fromEntries(new FormData(form).entries());
@@ -2982,6 +3005,8 @@ async function saveMedia(event) {
     return;
   }
   try {
+    mediaUploadSaving = true;
+    render();
     const uploaded = files.length ? await apiPost("/attachments", { files: await filesToDataUrls(files) }) : { files: [] };
     const response = await apiPost("/admin/media", {
       equipmentId,
@@ -2994,9 +3019,12 @@ async function saveMedia(event) {
     setData(response);
     pendingMediaUploadFiles = [];
     pendingMediaUploadDraft = {};
+    mediaUploadSaving = false;
     setState({ mediaEquipmentId: equipmentId, mediaUploadOpen: false, mediaUploadEquipmentId: "", toast: t("mediaSaved") });
     window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch (error) {
+    mediaUploadSaving = false;
+    render();
     console.warn("Media upload failed.", error);
     flash(formatUploadError(error));
   }
