@@ -37,8 +37,21 @@ app.use((request, response, next) => {
   }
   next();
 });
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "150mb" }));
 app.use("/uploads", express.static(uploadDir));
+
+app.use((error, _request, response, next) => {
+  if (!error) {
+    next();
+    return;
+  }
+  console.warn("API request rejected:", error.type || error.name || "Error", error.message);
+  if (error.type === "entity.too.large") {
+    response.status(413).json({ error: "Upload is too large. Please split files or compress images before uploading." });
+    return;
+  }
+  response.status(error.status || 400).json({ error: error.message || "Invalid request payload." });
+});
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true, time: Date.now() });

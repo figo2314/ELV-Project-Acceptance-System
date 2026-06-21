@@ -1,6 +1,7 @@
 const STORAGE_KEY = "elv-acceptance-offline-v2";
 const ATTACHMENT_DB_NAME = "elv-acceptance-attachments";
 const ATTACHMENT_STORE = "attachments";
+const MEDIA_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 const API_BASE =
   window.__ELV_API_BASE__ ||
   import.meta.env?.VITE_API_BASE ||
@@ -103,6 +104,7 @@ const dictionary = {
     uploadMedia: "Upload Media",
     noMedia: "No drawings, photos or documents attached to this equipment",
     mediaSaved: "Media saved",
+    uploadFailed: "Upload failed",
     drawing: "Drawing",
     map: "Map",
     locationPlan: "Location Plan",
@@ -245,6 +247,7 @@ const dictionary = {
     uploadMedia: "上傳媒體",
     noMedia: "此設備暫無圖紙、照片或文件",
     mediaSaved: "媒體已保存",
+    uploadFailed: "上傳失敗",
     drawing: "圖紙",
     map: "地圖",
     locationPlan: "位置圖",
@@ -1067,6 +1070,19 @@ function renderPendingMediaFile(file) {
       <small>${escapeHtml(file.type || "File")} &middot; ${formatFileSize(file.size)}</small>
     </div>
   `;
+}
+
+function getTotalFileSize(files) {
+  return [...files].reduce((total, file) => total + Number(file.size || 0), 0);
+}
+
+function formatUploadError(error) {
+  const detail = error?.detail || error?.message || "";
+  if (error?.status === 413 || /too large|payload too large|entity too large/i.test(detail)) {
+    return `${t("uploadFailed")}: files are too large. Please split files or compress images before uploading.`;
+  }
+  if (detail) return `${t("uploadFailed")}: ${detail}`;
+  return `${t("uploadFailed")}: please check the upload service and try again.`;
 }
 
 function renderAttachmentDock(record) {
@@ -2960,6 +2976,11 @@ async function saveMedia(event) {
   const payload = Object.fromEntries(new FormData(form).entries());
   const files = pendingMediaUploadFiles.length ? pendingMediaUploadFiles : [...(form.mediaFiles?.files || [])];
   if (!files.length && !String(payload.comments || "").trim()) return;
+  const totalSize = getTotalFileSize(files);
+  if (totalSize > MEDIA_UPLOAD_LIMIT_BYTES) {
+    flash(`${t("uploadFailed")}: ${formatFileSize(totalSize)} selected. Please upload less than ${formatFileSize(MEDIA_UPLOAD_LIMIT_BYTES)} at a time.`);
+    return;
+  }
   try {
     const uploaded = files.length ? await apiPost("/attachments", { files: await filesToDataUrls(files) }) : { files: [] };
     const response = await apiPost("/admin/media", {
@@ -2975,8 +2996,9 @@ async function saveMedia(event) {
     pendingMediaUploadDraft = {};
     setState({ mediaEquipmentId: equipmentId, mediaUploadOpen: false, mediaUploadEquipmentId: "", toast: t("mediaSaved") });
     window.setTimeout(() => setState({ toast: "" }), 1800);
-  } catch {
-    flash(t("serverOffline"));
+  } catch (error) {
+    console.warn("Media upload failed.", error);
+    flash(formatUploadError(error));
   }
 }
 
@@ -3018,7 +3040,7 @@ function translateComment() {
 
 async function apiGet(path) {
   const response = await fetch(`${API_BASE}${path}`);
-  if (!response.ok) throw new Error(`API failed: ${response.status}`);
+  if (!response.ok) throw await createApiError(response, path);
   return response.json();
 }
 
@@ -3028,8 +3050,27 @@ async function apiPost(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!response.ok) throw new Error(`API failed: ${response.status}`);
+  if (!response.ok) throw await createApiError(response, path);
   return response.json();
+}
+
+async function createApiError(response, path) {
+  let detail = "";
+  try {
+    const body = await response.json();
+    detail = body.error || body.message || "";
+  } catch {
+    try {
+      detail = await response.text();
+    } catch {
+      detail = "";
+    }
+  }
+  const error = new Error(detail || `API failed: ${response.status}`);
+  error.status = response.status;
+  error.path = path;
+  error.detail = detail;
+  return error;
 }
 
 function getFilteredRecords() {
