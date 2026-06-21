@@ -527,21 +527,27 @@ function renderFieldMobileDrill() {
 
   const options = getFieldMobileOptions(level, path);
   return `
-    <div class="mobile-drill-head">
-      <div>
-        <p class="eyebrow">${t("field")}</p>
-        <div class="section-title">${getFieldMobileTitle(level)}</div>
+    <div class="mobile-drill-shell">
+      <div class="mobile-drill-head">
+        <button class="mobile-back-button" data-field-mobile-back ${level === "project" ? "disabled" : ""}>‹</button>
+        <div>
+          <p class="eyebrow">${t("field")}</p>
+          <div class="section-title">${getFieldMobileTitle(level)}</div>
+        </div>
+        <span class="mobile-level-count">${options.length}</span>
       </div>
-      ${level === "project" ? "" : `<button class="ghost compact" data-field-mobile-back>${t("back")}</button>`}
-    </div>
-    <div class="mobile-drill-list">
-      ${options.map((item) => renderFieldMobileChoice(item)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
+      ${renderFieldMobileStepper(level)}
+      ${renderFieldMobileBreadcrumb(path)}
+      <div class="mobile-drill-list">
+        ${options.map((item) => renderFieldMobileChoice(item)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
+      </div>
     </div>
   `;
 }
 
 function renderFieldMobileDetailNav() {
   const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  const path = state.fieldMobilePath || {};
   return `
     <div class="mobile-drill-head">
       <div>
@@ -550,24 +556,43 @@ function renderFieldMobileDetailNav() {
       </div>
       <button class="ghost compact" data-field-mobile-back>${t("back")}</button>
     </div>
-    <div class="mobile-path-summary">
-      <span>${escapeHtml(getProjectName(state.selectedProjectId))}</span>
-      <span>${escapeHtml(getLocationName(state.selectedLocationId))}</span>
-      <span>${escapeHtml(state.selectedTeam || "")}</span>
-    </div>
+    ${renderFieldMobileBreadcrumb({ projectId: state.selectedProjectId, ...path, team: state.selectedTeam })}
   `;
 }
 
 function renderFieldMobileChoice(item) {
+  const tone = item.status ? ` ${item.status}` : "";
   return `
-    <button class="mobile-drill-choice" data-field-mobile-choice="${encodeURIComponent(JSON.stringify(item.payload))}">
+    <button class="mobile-drill-choice${tone}" data-field-mobile-choice="${encodeURIComponent(JSON.stringify(item.payload))}">
       <span>
         <strong>${escapeHtml(item.label)}</strong>
         <small>${escapeHtml(item.meta || "")}</small>
+        ${item.progress !== undefined ? `<i><b style="width:${item.progress}%"></b></i>` : ""}
       </span>
       <em>${item.action || ">"}</em>
     </button>
   `;
+}
+
+function renderFieldMobileStepper(level) {
+  const levels = ["project", "building", "floor", "room", "team", "equipment"];
+  const activeIndex = Math.max(0, levels.indexOf(level));
+  return `
+    <div class="mobile-stepper">
+      ${levels.map((item, index) => `<span class="${index <= activeIndex ? "active" : ""}"></span>`).join("")}
+    </div>
+  `;
+}
+
+function renderFieldMobileBreadcrumb(path) {
+  const chips = [];
+  if (path.projectId) chips.push(getProjectName(path.projectId));
+  if (path.building) chips.push(path.building);
+  if (path.floor) chips.push(path.floor);
+  if (path.room) chips.push(path.room);
+  if (path.team) chips.push(path.team);
+  if (!chips.length) return "";
+  return `<div class="mobile-path-chips">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>`;
 }
 
 function getFieldMobileTitle(level) {
@@ -587,6 +612,7 @@ function getFieldMobileOptions(level, path) {
     return state.data.projects.map((project) => ({
       label: project.name,
       meta: `${state.data.equipment.filter((item) => item.projectId === project.id).length} ${t("equipment")}`,
+      progress: getStats(state.data.records.filter((record) => record.projectId === project.id)).completion,
       payload: { level, projectId: project.id }
     }));
   }
@@ -597,6 +623,7 @@ function getFieldMobileOptions(level, path) {
     return [...tree.values()].map((building) => ({
       label: building.label,
       meta: t("building"),
+      progress: getStats(getRecordsForFieldPath({ projectId, building: building.building })).completion,
       payload: { level, projectId, building: building.building }
     }));
   }
@@ -606,6 +633,7 @@ function getFieldMobileOptions(level, path) {
     return [...(building?.children?.values() || [])].map((floor) => ({
       label: floor.label,
       meta: t("floor"),
+      progress: getStats(getRecordsForFieldPath({ projectId, building: path.building, floor: floor.floor })).completion,
       payload: { level, projectId, building: path.building, floor: floor.floor }
     }));
   }
@@ -615,6 +643,7 @@ function getFieldMobileOptions(level, path) {
     return [...(floor?.children?.values() || [])].map((room) => ({
       label: room.label,
       meta: t("room"),
+      progress: getStats(state.data.records.filter((record) => record.locationId === room.locationId)).completion,
       payload: { level, projectId, building: path.building, floor: path.floor, room: room.room, locationId: room.locationId }
     }));
   }
@@ -624,6 +653,7 @@ function getFieldMobileOptions(level, path) {
     return [...new Set(locationEquipment.map((item) => item.team))].map((team) => ({
       label: team,
       meta: `${locationEquipment.filter((item) => item.team === team).length} ${t("equipment")}`,
+      progress: getStats(state.data.records.filter((record) => record.locationId === path.locationId && record.team === team)).completion,
       payload: { level, projectId, building: path.building, floor: path.floor, room: path.room, locationId: path.locationId, team }
     }));
   }
@@ -638,12 +668,27 @@ function getFieldMobileOptions(level, path) {
           label: item.name,
           meta: `${item.type} / ${stats.completion}% ${t("completion")}`,
           action: statusLabel(item.status),
+          progress: stats.completion,
+          status: item.status,
           payload: { level, equipmentId: item.id }
         };
       });
   }
 
   return [];
+}
+
+function getRecordsForFieldPath(path) {
+  return state.data.records.filter((record) => {
+    if (path.projectId && record.projectId !== path.projectId) return false;
+    const equipment = state.data.equipment.find((item) => item.id === record.equipmentId);
+    const location = state.data.locations.find((item) => item.id === equipment?.locationId);
+    const parts = parseLocationParts(location?.name || "");
+    if (path.building && parts.building !== path.building) return false;
+    if (path.floor && parts.floor !== path.floor) return false;
+    if (path.room && parts.room !== path.room) return false;
+    return true;
+  });
 }
 
 function renderSelectors() {
