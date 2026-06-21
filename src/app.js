@@ -326,7 +326,8 @@ const fallbackData = {
 
 let state = loadState();
 let adminSearchTimer = null;
-const mediaDropFiles = new WeakMap();
+let pendingMediaUploadFiles = [];
+let pendingMediaUploadDraft = {};
 
 init();
 
@@ -369,6 +370,8 @@ function defaultState() {
     mediaRoom: "",
     mediaSearch: "",
     mediaCategoryFilter: "all",
+    mediaUploadOpen: false,
+    mediaUploadEquipmentId: "",
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -386,6 +389,8 @@ function loadState() {
       parsed.adminTreeWidth = null;
       parsed.adminTreeWidthManual = false;
     }
+    parsed.mediaUploadOpen = false;
+    parsed.mediaUploadEquipmentId = "";
     return { ...defaultState(), ...parsed };
   } catch (error) {
     console.warn("Unable to load saved ELV state. Falling back to defaults.", error);
@@ -457,6 +462,7 @@ function render() {
       ${state.view === "field" ? renderField() : renderAdmin()}
       ${renderIssueModal()}
       ${renderFieldAddPointModal()}
+      ${renderMediaUploadModal()}
       <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
     </main>
   `;
@@ -991,6 +997,78 @@ function renderFieldAddPointModal() {
   `;
 }
 
+function renderMediaUploadModal() {
+  if (!state.mediaUploadOpen) return "";
+  const equipmentId = state.mediaUploadEquipmentId || state.mediaEquipmentId;
+  const equipment = state.data.equipment.find((item) => item.id === equipmentId);
+  if (!equipment) return "";
+  const currentCategory = pendingMediaUploadDraft.category || getUploadMediaCategory();
+  const title = pendingMediaUploadDraft.title ?? (pendingMediaUploadFiles[0] ? stripFileExtension(pendingMediaUploadFiles[0].name) : "");
+  const reference = pendingMediaUploadDraft.reference || "";
+  const comments = pendingMediaUploadDraft.comments || "";
+  return `
+    <div class="modal-backdrop" data-media-upload-backdrop>
+      <section class="modal media-upload-modal" role="dialog" aria-modal="true" aria-label="${t("uploadMedia")}" data-media-upload-modal>
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">${t("uploadMedia")}</p>
+            <h2>${escapeHtml(equipment.name)}</h2>
+            <small>${escapeHtml(equipment.type)} &middot; ${escapeHtml(getLocationName(equipment.locationId))}</small>
+          </div>
+          <button class="icon-btn" data-close-media-upload title="${t("close")}">X</button>
+        </div>
+        <form class="media-upload-form" data-media-upload-form="${equipment.id}">
+          <div class="media-type-grid">
+            ${getMediaTypes()
+              .map(
+                (type) => `
+                  <label class="media-type-option ${type === currentCategory ? "active" : ""}">
+                    <input type="radio" name="category" value="${type}" ${type === currentCategory ? "checked" : ""} />
+                    <span>${t(type)}</span>
+                  </label>
+                `
+              )
+              .join("")}
+          </div>
+          <div class="modal-grid">
+            <label>Title
+              <input name="title" placeholder="e.g. AHU control schematic / Panel front photo" value="${escapeHtml(title)}" />
+            </label>
+            <label>Reference / Revision
+              <input name="reference" placeholder="e.g. Rev A, As-built, Site photo" value="${escapeHtml(reference)}" />
+            </label>
+          </div>
+          <label>${t("mediaComments")}
+            <textarea name="comments" rows="4" placeholder="${t("commentPlaceholder")}">${escapeHtml(comments)}</textarea>
+          </label>
+          <label class="media-modal-drop" data-media-modal-drop="${equipment.id}">
+            <strong>${pendingMediaUploadFiles.length ? `${pendingMediaUploadFiles.length} file(s) ready` : "Drop files here or click to choose"}</strong>
+            <span>PDF, image, DWG/DXF, Word or Excel files are supported.</span>
+            <input name="mediaFiles" type="file" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple />
+          </label>
+          <div class="media-file-list">
+            ${pendingMediaUploadFiles.map(renderPendingMediaFile).join("") || `<div class="empty small">No files selected yet. You can also save a comment-only media note.</div>`}
+          </div>
+          <div class="modal-actions">
+            <button class="ghost" type="button" data-close-media-upload>${t("close")}</button>
+            <button class="primary" type="submit">${t("saveChanges")}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderPendingMediaFile(file) {
+  return `
+    <div class="media-file-row">
+      <span>${getFileIcon(file)}</span>
+      <strong>${escapeHtml(file.name)}</strong>
+      <small>${escapeHtml(file.type || "File")} &middot; ${formatFileSize(file.size)}</small>
+    </div>
+  `;
+}
+
 function renderAttachmentDock(record) {
   return `
     <form class="attachment-dock" data-form="${record.id}">
@@ -1232,17 +1310,19 @@ function renderMediaPage() {
               <div class="media-toolbar">
                 ${renderMediaCategoryFilter(media)}
               </div>
-              <form class="media-upload-card" data-media-form="${activeEquipment.id}">
-                <input type="hidden" name="category" value="${escapeHtml(getUploadMediaCategory())}" />
-                <label>${t("mediaComments")}
-                  <textarea name="comments" rows="3" placeholder="${t("commentPlaceholder")}"></textarea>
-                </label>
-                <label class="media-drop-zone" data-media-drop-zone>${t("uploadMedia")}
-                  <span>Drop PDF, drawing, location photo or wiring image here</span>
-                  <input name="mediaFiles" type="file" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple />
-                </label>
-                <button class="primary" type="submit">${t("saveChanges")}</button>
-              </form>
+              <div class="media-upload-card" data-media-drop-zone="${activeEquipment.id}">
+                <div class="media-upload-copy">
+                  <p class="eyebrow">Upload Center</p>
+                  <strong>Drop drawings, photos, PDFs or documents here</strong>
+                  <span>Release files to review type, title and comments before saving.</span>
+                </div>
+                <div class="media-upload-actions">
+                  <label class="file-button">Choose Files
+                    <input data-media-file-picker="${activeEquipment.id}" type="file" accept="image/*,.pdf,.dwg,.dxf,.doc,.docx,.xls,.xlsx" multiple />
+                  </label>
+                  <button class="primary" type="button" data-media-open-upload="${activeEquipment.id}">${t("uploadMedia")}</button>
+                </div>
+              </div>
               <div class="media-section-title">${t("attachments")} <span>${visibleMedia.length}/${media.length}</span></div>
               <div class="media-grid">
                 ${visibleMedia.map(renderMediaCard).join("") || `<div class="empty small">${t("noMedia")}</div>`}
@@ -1440,8 +1520,9 @@ function renderMediaCard(item) {
       <div class="media-thumb">${hasFile ? renderAttachmentThumb(file) : `<span>${t("mediaComments")}</span>`}</div>
       <div>
         <span class="badge">${t(item.category || "document")}</span>
-        <strong>${escapeHtml(file.name || t("attachments"))}</strong>
+        <strong>${escapeHtml(item.title || file.name || t("attachments"))}</strong>
         <small>${escapeHtml(formatDateTime(item.createdAt) || item.createdAt || "")}</small>
+        ${item.reference ? `<small>${escapeHtml(item.reference)}</small>` : ""}
       </div>
       ${item.comments ? `<p>${escapeHtml(item.comments)}</p>` : ""}
     </article>
@@ -2093,12 +2174,28 @@ function closeFieldAddPointModal() {
   setState({ fieldAddPointOpen: false });
 }
 
+function openMediaUploadModal(equipmentId, files = []) {
+  pendingMediaUploadFiles = [...files];
+  pendingMediaUploadDraft = {};
+  setState({ mediaUploadOpen: true, mediaUploadEquipmentId: equipmentId || state.mediaEquipmentId });
+}
+
+function closeMediaUploadModal() {
+  pendingMediaUploadFiles = [];
+  pendingMediaUploadDraft = {};
+  setState({ mediaUploadOpen: false, mediaUploadEquipmentId: "" });
+}
+
 function goToIssuesPage() {
   setState({ adminPage: "issues", selectedIssueId: "" });
 }
 
 function handleModalBackdrop(event) {
   if (event.target !== event.currentTarget) return;
+  if (event.currentTarget.dataset.mediaUploadBackdrop !== undefined) {
+    closeMediaUploadModal();
+    return;
+  }
   if (event.currentTarget.dataset.fieldAddPointBackdrop !== undefined) {
     closeFieldAddPointModal();
     return;
@@ -2112,6 +2209,10 @@ function stopModalClick(event) {
 
 function handleEscapeKey(event) {
   if (event.key !== "Escape") return;
+  if (state.mediaUploadOpen) {
+    closeMediaUploadModal();
+    return;
+  }
   if (state.fieldAddPointOpen) {
     closeFieldAddPointModal();
     return;
@@ -2120,11 +2221,15 @@ function handleEscapeKey(event) {
 }
 
 function setAdminPage(page) {
-  setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all", dashboardEntityId: page === "dashboard" ? state.dashboardEntityId : "" });
+  pendingMediaUploadFiles = [];
+  pendingMediaUploadDraft = {};
+  setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "", dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all", dashboardEntityId: page === "dashboard" ? state.dashboardEntityId : "" });
 }
 
 function setView(view) {
-  setState({ view, selectedIssueId: "", fieldAddPointOpen: false });
+  pendingMediaUploadFiles = [];
+  pendingMediaUploadDraft = {};
+  setState({ view, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "" });
 }
 
 function setDashboardFilter(filter) {
@@ -2163,7 +2268,6 @@ function updateMediaFilter(key, value) {
 }
 
 function bindMediaDropZone(zone) {
-  const form = zone.closest("[data-media-form]");
   zone.addEventListener("dragover", (event) => {
     event.preventDefault();
     zone.classList.add("dragging");
@@ -2172,8 +2276,41 @@ function bindMediaDropZone(zone) {
   zone.addEventListener("drop", (event) => {
     event.preventDefault();
     zone.classList.remove("dragging");
-    mediaDropFiles.set(form, [...event.dataTransfer.files]);
+    const files = [...event.dataTransfer.files];
+    if (files.length) openMediaUploadModal(zone.dataset.mediaDropZone, files);
   });
+}
+
+function bindMediaModalDropZone(zone) {
+  zone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    zone.classList.add("dragging");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragging"));
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zone.classList.remove("dragging");
+    pendingMediaUploadDraft = readMediaUploadDraft(zone);
+    pendingMediaUploadFiles = [...event.dataTransfer.files];
+    render();
+  });
+  zone.querySelector("input")?.addEventListener("change", (event) => {
+    pendingMediaUploadDraft = readMediaUploadDraft(zone);
+    pendingMediaUploadFiles = [...event.currentTarget.files];
+    render();
+  });
+}
+
+function readMediaUploadDraft(element) {
+  const form = element.closest("[data-media-upload-form]");
+  if (!form) return pendingMediaUploadDraft;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  return {
+    category: payload.category || getUploadMediaCategory(),
+    title: payload.title || "",
+    reference: payload.reference || "",
+    comments: payload.comments || ""
+  };
 }
 
 function compareIssuePriority(a, b) {
@@ -2199,6 +2336,10 @@ function bindIssueDetailEvents() {
   document.querySelector("[data-go-issues]")?.addEventListener("click", goToIssuesPage);
   document.querySelector("[data-modal]")?.addEventListener("click", stopModalClick);
   document.querySelector("[data-field-add-point-modal]")?.addEventListener("click", stopModalClick);
+  document.querySelector("[data-media-upload-modal]")?.addEventListener("click", stopModalClick);
+  document.querySelectorAll("[data-close-media-upload]").forEach((button) => {
+    button.addEventListener("click", closeMediaUploadModal);
+  });
   document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
     backdrop.addEventListener("click", handleModalBackdrop);
   });
@@ -2223,7 +2364,14 @@ function bindEvents() {
     button.addEventListener("click", () => setState({ mediaCategoryFilter: button.dataset.mediaCategory || "all" }));
   });
   document.querySelectorAll("[data-media-drop-zone]").forEach(bindMediaDropZone);
-  document.querySelectorAll("[data-media-form]").forEach((form) => {
+  document.querySelectorAll("[data-media-open-upload]").forEach((button) => {
+    button.addEventListener("click", () => openMediaUploadModal(button.dataset.mediaOpenUpload, []));
+  });
+  document.querySelectorAll("[data-media-file-picker]").forEach((input) => {
+    input.addEventListener("change", () => openMediaUploadModal(input.dataset.mediaFilePicker, input.files || []));
+  });
+  document.querySelectorAll("[data-media-modal-drop]").forEach(bindMediaModalDropZone);
+  document.querySelectorAll("[data-media-upload-form]").forEach((form) => {
     form.addEventListener("submit", saveMedia);
   });
   document.querySelectorAll("[data-admin-project]").forEach((button) => {
@@ -2808,20 +2956,24 @@ async function saveFieldPoint(event) {
 async function saveMedia(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const equipmentId = form.dataset.mediaForm;
-  const files = mediaDropFiles.get(form) || [...form.mediaFiles.files];
-  if (!files.length && !form.comments.value.trim()) return;
+  const equipmentId = form.dataset.mediaUploadForm;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const files = pendingMediaUploadFiles.length ? pendingMediaUploadFiles : [...(form.mediaFiles?.files || [])];
+  if (!files.length && !String(payload.comments || "").trim()) return;
   try {
     const uploaded = files.length ? await apiPost("/attachments", { files: await filesToDataUrls(files) }) : { files: [] };
     const response = await apiPost("/admin/media", {
       equipmentId,
-      category: form.category.value,
-      comments: form.comments.value,
+      category: payload.category,
+      title: payload.title,
+      reference: payload.reference,
+      comments: payload.comments,
       files: uploaded.files || []
     });
     setData(response);
-    mediaDropFiles.delete(form);
-    setState({ mediaEquipmentId: equipmentId, toast: t("mediaSaved") });
+    pendingMediaUploadFiles = [];
+    pendingMediaUploadDraft = {};
+    setState({ mediaEquipmentId: equipmentId, mediaUploadOpen: false, mediaUploadEquipmentId: "", toast: t("mediaSaved") });
     window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch {
     flash(t("serverOffline"));
@@ -3170,6 +3322,33 @@ function renderAttachmentThumb(photo) {
   if (src) return `<a class="attachment-chip" href="${escapeHtml(src)}" target="_blank" rel="noreferrer">${escapeHtml(name)}</a>`;
   if (photo?.localId && isImageAttachment(photo)) return `<img data-local-attachment="${escapeHtml(photo.localId)}" alt="${escapeHtml(name)}" />`;
   return `<div class="attachment-chip">${escapeHtml(name)}</div>`;
+}
+
+function stripFileExtension(name = "") {
+  return String(name).replace(/\.[^/.]+$/, "");
+}
+
+function formatFileSize(size = 0) {
+  if (!Number.isFinite(size) || size <= 0) return "0 KB";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = size;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getFileIcon(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  if (type.startsWith("image/")) return "IMG";
+  if (type.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (name.endsWith(".dwg") || name.endsWith(".dxf")) return "CAD";
+  if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "XLS";
+  if (name.endsWith(".doc") || name.endsWith(".docx")) return "DOC";
+  return "FILE";
 }
 
 function getAttachmentSrc(photo) {

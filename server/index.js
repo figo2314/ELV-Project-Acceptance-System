@@ -205,6 +205,8 @@ app.post("/api/admin/media", async (request, response) => {
     if (!equipment) return mutationError(404, "Equipment not found.");
     const files = Array.isArray(body.files) ? body.files : [];
     const comments = String(body.comments || "").trim();
+    const title = String(body.title || "").trim();
+    const reference = String(body.reference || "").trim();
     if (!files.length && !comments) return mutationError(400, "Media file or comment is required.");
     const createdAt = new Date().toISOString();
     if (files.length) {
@@ -215,6 +217,8 @@ app.post("/api/admin/media", async (request, response) => {
           projectId: equipment.projectId,
           locationId: equipment.locationId,
           category: String(body.category || "document").trim() || "document",
+          title,
+          reference,
           comments,
           file,
           createdAt
@@ -227,6 +231,8 @@ app.post("/api/admin/media", async (request, response) => {
         projectId: equipment.projectId,
         locationId: equipment.locationId,
         category: String(body.category || "document").trim() || "document",
+        title,
+        reference,
         comments,
         file: null,
         createdAt
