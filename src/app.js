@@ -526,15 +526,23 @@ function renderFieldMobileDrill() {
   if (level === "detail") return renderFieldMobileDetailNav();
 
   const options = getFieldMobileOptions(level, path);
+  const step = getFieldMobileStepInfo(level);
   return `
     <div class="mobile-drill-shell">
-      <div class="mobile-drill-head">
-        <button class="mobile-back-button" data-field-mobile-back ${level === "project" ? "disabled" : ""}>‹</button>
-        <div>
-          <p class="eyebrow">${t("field")}</p>
-          <div class="section-title">${getFieldMobileTitle(level)}</div>
+      <div class="mobile-drill-nav-card">
+        <div class="mobile-drill-topline">
+          ${renderFieldMobileBackButton(level, path)}
+          <span class="mobile-step-pill">Step ${step.current}/${step.total}</span>
         </div>
-        <span class="mobile-level-count">${options.length}</span>
+        <div class="mobile-current-level">
+          <p class="eyebrow">Now selecting</p>
+          <div class="section-title">${getFieldMobilePrompt(level)}</div>
+          <p>${getFieldMobileContext(level, path)}</p>
+        </div>
+        <div class="mobile-drill-meta">
+          <span>${options.length} options</span>
+          <span>${getFieldMobileTitle(level)}</span>
+        </div>
       </div>
       ${renderFieldMobileStepper(level)}
       ${renderFieldMobileBreadcrumb(path)}
@@ -548,15 +556,37 @@ function renderFieldMobileDrill() {
 function renderFieldMobileDetailNav() {
   const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
   const path = state.fieldMobilePath || {};
+  const step = getFieldMobileStepInfo("equipment");
   return `
-    <div class="mobile-drill-head">
-      <div>
+    <div class="mobile-drill-nav-card detail-nav">
+      <div class="mobile-drill-topline">
+        ${renderFieldMobileBackButton("detail", path)}
+        <span class="mobile-step-pill">Step ${step.current}/${step.total}</span>
+      </div>
+      <div class="mobile-current-level">
         <p class="eyebrow">${t("selectedEquipment")}</p>
         <div class="section-title">${escapeHtml(equipment?.name || t("equipment"))}</div>
+        <p>Review points, comments, photos and acceptance status.</p>
       </div>
-      <button class="ghost compact" data-field-mobile-back>${t("back")}</button>
     </div>
-    ${renderFieldMobileBreadcrumb({ projectId: state.selectedProjectId, ...path, team: state.selectedTeam })}
+    ${renderFieldMobileBreadcrumb({ projectId: state.selectedProjectId, ...path, team: state.selectedTeam, equipment: equipment?.name })}
+  `;
+}
+
+function renderFieldMobileBackButton(level, path) {
+  if (level === "project") {
+    return `
+      <button class="mobile-back-action disabled" disabled>
+        <span class="mobile-back-arrow">&larr;</span>
+        <span><small>Start level</small><strong>${t("project")}</strong></span>
+      </button>
+    `;
+  }
+  return `
+    <button class="mobile-back-action" data-field-mobile-back>
+      <span class="mobile-back-arrow">&larr;</span>
+      <span><small>Back to</small><strong>${escapeHtml(getFieldMobileBackTarget(level, path))}</strong></span>
+    </button>
   `;
 }
 
@@ -576,23 +606,95 @@ function renderFieldMobileChoice(item) {
 
 function renderFieldMobileStepper(level) {
   const levels = ["project", "building", "floor", "room", "team", "equipment"];
-  const activeIndex = Math.max(0, levels.indexOf(level));
+  const activeIndex = Math.max(0, levels.indexOf(level === "detail" ? "equipment" : level));
   return `
     <div class="mobile-stepper">
-      ${levels.map((item, index) => `<span class="${index <= activeIndex ? "active" : ""}"></span>`).join("")}
+      ${levels.map((item, index) => `
+        <span class="${index <= activeIndex ? "active" : ""} ${index === activeIndex ? "current" : ""}">
+          <i>${index + 1}</i>
+          <b>${getFieldMobileTitle(item)}</b>
+        </span>
+      `).join("")}
     </div>
   `;
 }
 
 function renderFieldMobileBreadcrumb(path) {
+  const chips = getFieldMobileBreadcrumbItems(path);
+  if (!chips.length) {
+    return `
+      <div class="mobile-path-trail empty">
+        <small>Current path</small>
+        <strong>Select a project to start</strong>
+      </div>
+    `;
+  }
+  return `
+    <div class="mobile-path-trail">
+      <small>Current path</small>
+      <div>
+        ${chips.map((chip, index) => `
+          <span>
+            <b>${index + 1}</b>
+            ${escapeHtml(chip)}
+          </span>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function getFieldMobileBreadcrumbItems(path) {
   const chips = [];
   if (path.projectId) chips.push(getProjectName(path.projectId));
   if (path.building) chips.push(path.building);
   if (path.floor) chips.push(path.floor);
   if (path.room) chips.push(path.room);
   if (path.team) chips.push(path.team);
-  if (!chips.length) return "";
-  return `<div class="mobile-path-chips">${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}</div>`;
+  if (path.equipment) chips.push(path.equipment);
+  return chips.filter(Boolean);
+}
+
+function getFieldMobileStepInfo(level) {
+  const levels = ["project", "building", "floor", "room", "team", "equipment"];
+  const normalized = level === "detail" ? "equipment" : level;
+  return {
+    current: Math.max(1, levels.indexOf(normalized) + 1),
+    total: levels.length
+  };
+}
+
+function getFieldMobilePrompt(level) {
+  const labels = {
+    project: `Select ${t("project")}`,
+    building: `Select ${t("building")}`,
+    floor: `Select ${t("floor")}`,
+    room: `Select ${t("room")}`,
+    team: `Select ${t("team")}`,
+    equipment: `Select ${t("equipment")}`
+  };
+  return labels[level] || t("equipment");
+}
+
+function getFieldMobileContext(level, path) {
+  if (level === "project") return "Choose the active project before entering site locations.";
+  const parent = getFieldMobileBreadcrumbItems(path).slice(-1)[0];
+  if (!parent) return "Continue through the site hierarchy.";
+  return `Inside ${parent}`;
+}
+
+function getFieldMobileBackTarget(level, path) {
+  if (level === "detail") return t("equipment");
+  const previous = {
+    building: t("project"),
+    floor: t("building"),
+    room: t("floor"),
+    team: t("room"),
+    equipment: t("team")
+  }[level] || t("project");
+  const chips = getFieldMobileBreadcrumbItems(path);
+  const parentValue = chips[Math.max(0, chips.length - 2)];
+  return parentValue ? `${previous}: ${parentValue}` : previous;
 }
 
 function getFieldMobileTitle(level) {

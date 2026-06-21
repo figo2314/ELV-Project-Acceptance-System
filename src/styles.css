@@ -726,20 +726,186 @@ textarea {
   padding: 5px 9px;
 }
 
+.mobile-drill-nav-card {
+  background:
+    linear-gradient(135deg, rgb(23 79 111 / 8%), rgb(255 255 255 / 0%) 56%),
+    #fff;
+  border: 1px solid #dce8e5;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.mobile-drill-nav-card.detail-nav {
+  border-color: #cfe0dc;
+}
+
+.mobile-drill-topline,
+.mobile-drill-meta {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.mobile-drill-topline {
+  gap: 10px;
+}
+
+.mobile-back-action {
+  align-items: center;
+  background: #174f6f;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  gap: 8px;
+  max-width: min(72vw, 280px);
+  min-height: 42px;
+  padding: 6px 12px 6px 7px;
+  text-align: left;
+}
+
+.mobile-back-action.disabled {
+  background: #e8f0ee;
+  color: #60727a;
+  cursor: default;
+}
+
+.mobile-back-action span:last-child {
+  display: grid;
+  line-height: 1.12;
+  min-width: 0;
+}
+
+.mobile-back-action small,
+.mobile-current-level p,
+.mobile-drill-meta {
+  color: var(--muted);
+}
+
+.mobile-back-action small {
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.mobile-back-action strong {
+  font-size: 12px;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-back-arrow {
+  align-items: center;
+  background: rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 28px;
+  font-size: 17px;
+  font-weight: 900;
+  height: 28px;
+  justify-content: center;
+}
+
+.mobile-back-action.disabled .mobile-back-arrow {
+  background: #fff;
+}
+
+.mobile-step-pill {
+  background: #eef4f3;
+  border: 1px solid #d7e4e1;
+  border-radius: 999px;
+  color: var(--brand);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 7px 10px;
+}
+
+.mobile-current-level {
+  display: grid;
+  gap: 4px;
+}
+
+.mobile-current-level .section-title {
+  font-size: 24px;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.mobile-current-level p {
+  font-size: 13px;
+  margin: 0;
+}
+
+.mobile-drill-meta {
+  border-top: 1px solid #edf3f1;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 8px;
+  padding-top: 10px;
+}
+
 .mobile-stepper {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .mobile-stepper span {
-  background: #dce8e5;
-  border-radius: 999px;
-  height: 5px;
+  align-items: center;
+  background: #f1f6f5;
+  border: 1px solid #dce8e5;
+  border-radius: 8px;
+  color: #8a9a9e;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  min-height: 42px;
+  min-width: 0;
+  padding: 6px 2px;
 }
 
 .mobile-stepper span.active {
+  background: #e7f1f3;
+  border-color: #bed4d8;
+  color: var(--brand);
+}
+
+.mobile-stepper span.current {
   background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.mobile-stepper i {
+  align-items: center;
+  background: rgb(255 255 255 / 72%);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 950;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.mobile-stepper .current i {
+  background: rgb(255 255 255 / 22%);
+}
+
+.mobile-stepper b {
+  font-size: 9px;
+  font-weight: 850;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mobile-path-chips {
@@ -756,6 +922,56 @@ textarea {
   font-size: 11px;
   font-weight: 800;
   padding: 5px 8px;
+}
+
+.mobile-path-trail {
+  background: #fff;
+  border: 1px solid #dce8e5;
+  border-radius: 10px;
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+}
+
+.mobile-path-trail small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mobile-path-trail > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.mobile-path-trail span,
+.mobile-path-trail.empty strong {
+  align-items: center;
+  background: #f6faf9;
+  border: 1px solid #e3ecea;
+  border-radius: 999px;
+  color: #43545b;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 9px 6px 6px;
+}
+
+.mobile-path-trail b {
+  align-items: center;
+  background: #dce8e5;
+  border-radius: 999px;
+  color: var(--brand);
+  display: inline-flex;
+  flex: 0 0 18px;
+  font-size: 10px;
+  height: 18px;
+  justify-content: center;
 }
 
 .mobile-drill-list {
