@@ -61,6 +61,23 @@ async function main() {
   }, token);
   assert(media.media.some((item) => item.equipmentId === equipment.id && item.comments === "Smoke media comment"), "Media note was not created.");
 
+  const mediaUpload = await apiMultipart("/admin/media-upload", {
+    equipmentId: equipment.id,
+    category: "document",
+    title: "Smoke uploaded document",
+    comments: "Smoke uploaded file"
+  }, [{
+    name: "smoke-upload.txt",
+    type: "text/plain",
+    content: "ELV smoke upload"
+  }], token);
+  const uploadedMedia = mediaUpload.media.find((item) => item.title === "Smoke uploaded document");
+  assert(uploadedMedia?.file?.url?.startsWith("/api/files/"), "Media upload did not return authenticated file URL.");
+  const unauthDownload = await apiRawGet(uploadedMedia.file.url, null, 401);
+  assert(unauthDownload.status === 401, "Unauthenticated file download should be rejected.");
+  const download = await apiRawGet(uploadedMedia.file.url, token);
+  assert(download.text === "ELV smoke upload", "Authenticated file download returned unexpected content.");
+
   const csv = [
     "Project,Location,Team,Equipment,Type,Point,Point Type,Reference,Assignee,Due",
     "Smoke Import Project,Smoke Tower / 1F / Plant Room,BMS,SMOKE-DDC-01,DDC Panel,Smoke AI Point,Analog Input,20-25 C,QA,2026-06-30"
@@ -119,7 +136,7 @@ async function main() {
 
   console.log(JSON.stringify({
     ok: true,
-    checks: ["ready", "login", "point", "sync", "media", "import", "metrics"],
+    checks: ["ready", "login", "point", "sync", "media", "upload", "file-download", "import", "metrics"],
     projectCount: imported.data.projects.length,
     recordCount: imported.data.records.length,
     requestsTotal: metrics.requestsTotal,
@@ -135,15 +152,42 @@ async function apiPost(path, body, token) {
   return apiFetch(path, { method: "POST", body, token });
 }
 
+async function apiMultipart(path, fields, files, token) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields || {})) {
+    form.append(key, String(value));
+  }
+  for (const file of files || []) {
+    form.append("files", new Blob([file.content], { type: file.type }), file.name);
+  }
+  return apiFetch(path, { method: "POST", body: form, token, multipart: true });
+}
+
+async function apiRawGet(path, token, expectedStatus = 200) {
+  const response = await fetch(`${apiBase}${path.replace(/^\/api/, "")}`, {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }
+  });
+  const text = await response.text();
+  if (response.status !== expectedStatus) {
+    throw new Error(`GET ${path} failed: ${response.status} ${text}`);
+  }
+  return { status: response.status, text };
+}
+
 async function apiFetch(path, options = {}) {
   const expectedStatus = options.expectedStatus || 200;
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method || "GET",
-    headers: {
+    headers: options.multipart ? {
+      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
+    } : {
       "Content-Type": "application/json",
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
     },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: options.body === undefined ? undefined : options.multipart ? options.body : JSON.stringify(options.body)
   });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};

@@ -31,11 +31,11 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 
 ## P0 - Uploads And File Safety
 
-- [ ] Replace memory-based uploads with streaming disk or object-storage uploads.
-- [ ] Add authenticated file download routes instead of directly exposing `/uploads`.
+- [x] Replace memory-based uploads with streaming disk or object-storage uploads.
+- [x] Add authenticated file download routes instead of directly exposing `/uploads`.
 - [ ] Add virus scanning or a quarantine workflow for uploaded files.
-- [ ] Add per-project upload quotas and cleanup tools for orphaned files.
-- [ ] Store file metadata in the production database while storing binary files on server/object storage.
+- [x] Add per-project upload quotas and cleanup tools for orphaned files.
+- [x] Store file metadata in the production database while storing binary files on server/object storage.
 
 ## P1 - Excel Import
 

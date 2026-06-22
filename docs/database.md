@@ -46,6 +46,16 @@ The current API defaults to `DATA_STORE=json` so the MVP remains usable while Po
 
 Use `DATA_STORE=postgres` after running the migration and JSON seed import. Auth, sessions, `/api/auth/me`, `/api/bootstrap`, `/api/sync`, equipment, point, row, project, user, media, and Excel import endpoints now have PostgreSQL runtime support. The standalone `/api/attachments` file endpoint stores files on disk and returns metadata for later record/media writes.
 
+## File Storage
+
+Uploaded files are stored on disk under `data/uploads`, while PostgreSQL stores metadata and authenticated storage paths. The API does not expose `/uploads` as a static public directory; clients read files through `/api/files/:fileName`, which requires login and checks project access through the attachment's inspection record or media asset.
+
+Upload hardening controls:
+
+- `UPLOAD_PROJECT_QUOTA_MB` sets an optional per-project quota. Use `0` to disable quota enforcement.
+- `UPLOAD_ORPHAN_GRACE_HOURS` controls how old an unreferenced file must be before cleanup can remove it.
+- `POST /api/admin/storage/cleanup` is admin-only. Pass `{ "dryRun": true }` to preview orphan cleanup, or omit it to delete old orphan/temp files.
+
 Health endpoints:
 
 - `/api/health` confirms the API process is alive and reports the configured data store.

@@ -637,7 +637,7 @@ function toAttachment(attachment) {
     name: attachment.fileName,
     type: attachment.mimeType || "",
     size: attachment.size || 0,
-    url: attachment.storagePath,
+    url: toDownloadUrl(attachment.storagePath),
     source: attachment.source,
     uploadedAt: attachment.createdAt?.toISOString?.() || ""
   };
@@ -732,7 +732,7 @@ function toMediaAttachmentCreate(file) {
     fileName: file.name || file.url?.split("/").pop() || "media-file",
     mimeType: file.type || null,
     size: Number(file.size || 0) || null,
-    storagePath: file.url || "",
+    storagePath: normalizeStoragePath(file.url || ""),
     source: "media",
     createdAt: parseDateTime(file.uploadedAt) || new Date()
   };
@@ -828,14 +828,15 @@ async function syncRecordAttachments(tx, recordId, photos) {
   const incoming = (Array.isArray(photos) ? photos : []).filter((file) => file?.url);
   const existing = await tx.attachment.findMany({ where: { recordId } });
   const existingByPath = new Map(existing.map((item) => [item.storagePath, item]));
-  const incomingPaths = new Set(incoming.map((file) => file.url));
+  const incomingPaths = new Set(incoming.map((file) => normalizeStoragePath(file.url)));
   for (const item of existing) {
     if (!incomingPaths.has(item.storagePath)) {
       await tx.attachment.delete({ where: { id: item.id } });
     }
   }
   for (const file of incoming) {
-    if (existingByPath.has(file.url)) continue;
+    const storagePath = normalizeStoragePath(file.url);
+    if (existingByPath.has(storagePath)) continue;
     await tx.attachment.create({
       data: {
         id: file.id || createImportedId("att"),
@@ -843,7 +844,7 @@ async function syncRecordAttachments(tx, recordId, photos) {
         fileName: file.name || file.url.split("/").pop() || "attachment",
         mimeType: file.type || null,
         size: Number(file.size || 0) || null,
-        storagePath: file.url,
+        storagePath,
         source: file.source === "camera" ? "camera" : "upload",
         createdAt: parseDateTime(file.uploadedAt) || new Date()
       }
@@ -947,4 +948,15 @@ function createImportedId(prefix) {
 
 function createTemporaryPassword() {
   return `Change-${randomUUID().replace(/-/g, "").slice(0, 18)}`;
+}
+
+function normalizeStoragePath(url) {
+  const value = String(url || "");
+  if (!value) return "";
+  const fileName = value.split("/").pop() || "";
+  return fileName ? `/api/files/${encodeURIComponent(fileName)}` : value;
+}
+
+function toDownloadUrl(storagePath) {
+  return normalizeStoragePath(storagePath);
 }

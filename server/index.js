@@ -1,7 +1,7 @@
 import express from "express";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
@@ -10,7 +10,7 @@ import multer from "multer";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { dataStore, isPostgresMode, startupMode } from "./config.js";
-import { checkPostgresReady, disconnectPrisma } from "./prisma.js";
+import { checkPostgresReady, disconnectPrisma, getPrisma } from "./prisma.js";
 import {
   appendPostgresAuditLog,
   createPostgresMedia,
@@ -40,11 +40,14 @@ const dataDir = path.join(rootDir, "data");
 const dbPath = path.join(dataDir, "db.json");
 const seedDbPath = path.join(dataDir, "seed.json");
 const uploadDir = path.join(dataDir, "uploads");
+const tempUploadDir = path.join(uploadDir, ".tmp");
 const port = Number(process.env.API_PORT || 4177);
 const jsonLimit = process.env.API_JSON_LIMIT || "25mb";
 const maxUploadFiles = 12;
 const maxUploadFileBytes = 50 * 1024 * 1024;
 const maxUploadTotalBytes = 100 * 1024 * 1024;
+const uploadProjectQuotaBytes = Number(process.env.UPLOAD_PROJECT_QUOTA_MB || 0) * 1024 * 1024;
+const orphanCleanupGraceMs = Number(process.env.UPLOAD_ORPHAN_GRACE_HOURS || 24) * 60 * 60 * 1000;
 const sessionDurationMs = 1000 * 60 * 60 * 12;
 const bcryptRounds = Number(process.env.BCRYPT_ROUNDS || 12);
 const loginLockThreshold = Number(process.env.LOGIN_LOCK_THRESHOLD || 5);
@@ -115,7 +118,16 @@ const allowedUploadTypes = new Map([
   ["text/plain", [".txt"]]
 ]);
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_request, _file, callback) => {
+      mkdir(tempUploadDir, { recursive: true })
+        .then(() => callback(null, tempUploadDir))
+        .catch((error) => callback(error));
+    },
+    filename: (_request, file, callback) => {
+      callback(null, `${Date.now()}-${randomUUID()}${path.extname(file.originalname || "")}`);
+    }
+  }),
   limits: { fileSize: maxUploadFileBytes, files: maxUploadFiles }
 });
 const apiLimiter = rateLimit({
@@ -176,13 +188,13 @@ app.use((request, response, next) => {
 });
 app.use("/api", apiLimiter);
 app.use(express.json({ limit: jsonLimit }));
-app.use("/uploads", express.static(uploadDir));
 
 app.use((error, request, response, next) => {
   if (!error) {
     next();
     return;
   }
+  cleanupRequestTempFiles(request).catch(() => {});
   sendApiError(response, error, request);
 });
 
@@ -295,6 +307,7 @@ const asyncRoute = (handler) => async (request, response) => {
   try {
     await handler(request, response);
   } catch (error) {
+    await cleanupRequestTempFiles(request);
     sendApiError(response, error, request);
   }
 };
@@ -359,6 +372,20 @@ app.get("/api/ready", asyncRoute(async (_request, response) => {
 app.get("/api/metrics", requireAuth(["admin"]), (_request, response) => {
   response.json(metricsSnapshot());
 });
+
+app.post("/api/admin/storage/cleanup", requireAuth(["admin"]), asyncRoute(async (request, response) => {
+  const result = await cleanupOrphanUploads(Boolean(request.body?.dryRun));
+  if (!request.body?.dryRun) {
+    if (isPostgresMode) {
+      await appendPostgresAuditLog(request.auth.user, "storage.cleanup", "storage", "uploads", result);
+    } else {
+      const db = await readDb();
+      appendAuditLog(db, request.auth.user, "storage.cleanup", "storage", "uploads", result);
+      await writeDb(db);
+    }
+  }
+  response.json(result);
+}));
 
 app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) => {
   const username = String(request.body?.username || "").trim().toLowerCase();
@@ -492,6 +519,32 @@ app.get("/api/bootstrap", requireAuth(), asyncRoute(async (request, response) =>
   response.json(filterDbForUser(await readDb(), request.auth.user));
 }));
 
+app.get("/api/files/:fileName", requireAuth(), asyncRoute(async (request, response) => {
+  const fileName = path.basename(String(request.params.fileName || ""));
+  if (!fileName || fileName !== String(request.params.fileName || "")) {
+    response.status(400).json({ error: "Invalid file name." });
+    return;
+  }
+  const filePath = path.join(uploadDir, fileName);
+  if (!filePath.startsWith(uploadDir)) {
+    response.status(400).json({ error: "Invalid file path." });
+    return;
+  }
+  const allowed = isPostgresMode
+    ? await canAccessPostgresFile(request.auth.user, fileName)
+    : canAccessJsonFile(await readDb(), request.auth.user, fileName);
+  if (!allowed) {
+    response.status(404).json({ error: "File not found." });
+    return;
+  }
+  const fileStat = await stat(filePath).catch(() => null);
+  if (!fileStat?.isFile()) {
+    response.status(404).json({ error: "File not found." });
+    return;
+  }
+  response.sendFile(filePath);
+}));
+
 app.get("/api/template/equipment", asyncRoute(async (_request, response) => {
   const rows = [
     {
@@ -603,9 +656,10 @@ app.post("/api/attachments", requireAuth(), uploadLimiter, upload.array("files",
     response.status(413).json({ error: `Upload is too large. Upload less than ${Math.round(maxUploadTotalBytes / 1024 / 1024)} MB at a time.` });
     return;
   }
+  await assertProjectUploadQuota(request.auth.user, request.body?.projectId || request.body?.recordId || "", totalSize);
   const savedFiles = [];
   for (const file of files) {
-    savedFiles.push(file.buffer ? await saveMulterAttachment(file) : await saveAttachment(file));
+    savedFiles.push(file.path ? await saveMulterAttachment(file) : await saveAttachment(file));
   }
   response.status(201).json({ files: savedFiles });
 }));
@@ -630,6 +684,7 @@ app.post(
       response.status(413).json({ error: `Upload is too large. Upload less than ${Math.round(maxUploadTotalBytes / 1024 / 1024)} MB at a time.` });
       return;
     }
+    await assertProjectUploadQuota(request.auth.user, body.equipmentId, totalSize);
 
     await mkdir(uploadDir, { recursive: true });
     const savedFiles = [];
@@ -1178,6 +1233,7 @@ function assertJsonDataStore() {
 async function checkStorageReady() {
   try {
     await mkdir(uploadDir, { recursive: true });
+    await mkdir(tempUploadDir, { recursive: true });
     await readFile(seedDbPath, "utf8").catch(() => "");
     return { ok: true, uploadDir: path.relative(rootDir, uploadDir) };
   } catch (error) {
@@ -1368,6 +1424,42 @@ function canAccessProject(user, projectId) {
   return !projectId || projectIds.includes(projectId);
 }
 
+async function canAccessPostgresFile(user, fileName) {
+  const storagePaths = storagePathCandidates(fileName);
+  const attachment = await getPrisma().attachment.findFirst({
+    where: { storagePath: { in: storagePaths } },
+    include: {
+      record: { select: { projectId: true } },
+      media: { select: { projectId: true } }
+    }
+  });
+  const projectId = attachment?.record?.projectId || attachment?.media?.projectId || "";
+  return Boolean(attachment && canAccessProject(user, projectId));
+}
+
+function canAccessJsonFile(db, user, fileName) {
+  const storagePaths = new Set(storagePathCandidates(fileName));
+  const records = Array.isArray(db.records) ? db.records : [];
+  for (const record of records) {
+    const photos = Array.isArray(record.photos) ? record.photos : [];
+    if (photos.some((file) => storagePaths.has(file?.url || file))) return canAccessProject(user, record.projectId);
+  }
+  const media = Array.isArray(db.media) ? db.media : [];
+  for (const item of media) {
+    const file = item.file;
+    if (file && storagePaths.has(file.url || file)) return canAccessProject(user, item.projectId);
+  }
+  return false;
+}
+
+function storagePathCandidates(fileName) {
+  return [fileDownloadUrl(fileName), `/uploads/${fileName}`];
+}
+
+function fileDownloadUrl(fileName) {
+  return `/api/files/${encodeURIComponent(fileName)}`;
+}
+
 function filterDbForUser(db, user) {
   if (!user || user.role === "admin") return sanitizeDbForClient(db);
   const allowedProjects = new Set(Array.isArray(user.projectIds) ? user.projectIds : []);
@@ -1393,9 +1485,29 @@ function sanitizeDbForClient(db, options = {}) {
   const { sessions: _sessions, ...clientDb } = db;
   return {
     ...clientDb,
+    records: (clientDb.records || []).map((record) => ({
+      ...record,
+      photos: (record.photos || []).map(sanitizeAttachmentForClient)
+    })),
+    media: (clientDb.media || []).map((item) => ({
+      ...item,
+      file: item.file ? sanitizeAttachmentForClient(item.file) : item.file
+    })),
     users: includeUsers ? (db.users || []).map(publicUser) : [],
     auditLogs: [...(db.auditLogs || [])].slice(-300).reverse()
   };
+}
+
+function sanitizeAttachmentForClient(file) {
+  if (!file || typeof file !== "object") return file;
+  return { ...file, url: normalizeDownloadUrl(file.url) };
+}
+
+function normalizeDownloadUrl(url) {
+  const value = String(url || "");
+  if (!value || value.startsWith("/api/files/") || /^(data:|blob:|https?:)/i.test(value)) return value;
+  if (!value.startsWith("/uploads/")) return value;
+  return fileDownloadUrl(path.basename(value));
 }
 
 function appendAuditLog(db, user, action, targetType, targetId, details = {}, success = true) {
@@ -1429,10 +1541,11 @@ async function saveAttachment(file) {
   const storedName = `${Date.now()}-${randomUUID()}${extension}`;
   await writeFile(path.join(uploadDir, storedName), parsed.buffer);
   return {
+    id: createId("att"),
     name: originalName,
     type: file.type || parsed.mimeType,
     size: parsed.buffer.length,
-    url: `/uploads/${storedName}`,
+    url: fileDownloadUrl(storedName),
     uploadedAt: new Date().toISOString()
   };
 }
@@ -1442,12 +1555,14 @@ async function saveMulterAttachment(file) {
   validateUploadFile({ name: originalName, type: file.mimetype, size: file.size, mimeType: file.mimetype });
   const extension = getSafeExtension(originalName, file.mimetype);
   const storedName = `${Date.now()}-${randomUUID()}${extension}`;
-  await writeFile(path.join(uploadDir, storedName), file.buffer);
+  await mkdir(uploadDir, { recursive: true });
+  await rename(file.path, path.join(uploadDir, storedName));
   return {
+    id: createId("att"),
     name: originalName,
     type: file.mimetype || "application/octet-stream",
     size: file.size,
-    url: `/uploads/${storedName}`,
+    url: fileDownloadUrl(storedName),
     uploadedAt: new Date().toISOString()
   };
 }
@@ -1456,8 +1571,18 @@ async function deleteUploadedFiles(files) {
   await Promise.all(
     files
       .map((file) => file?.url)
-      .filter((url) => typeof url === "string" && url.startsWith("/uploads/"))
+      .filter((url) => typeof url === "string" && (url.startsWith("/uploads/") || url.startsWith("/api/files/")))
       .map((url) => rm(path.join(uploadDir, path.basename(url)), { force: true }).catch(() => {}))
+  );
+}
+
+async function cleanupRequestTempFiles(request) {
+  const files = Array.isArray(request?.files) ? request.files : [];
+  await Promise.all(
+    files
+      .map((file) => file?.path)
+      .filter(Boolean)
+      .map((filePath) => rm(filePath, { force: true }).catch(() => {}))
   );
 }
 
@@ -1476,6 +1601,120 @@ function validateUploadFile(file) {
     error.status = 400;
     throw error;
   }
+}
+
+async function assertProjectUploadQuota(user, projectHint, incomingBytes) {
+  if (!uploadProjectQuotaBytes) return;
+  const db = isPostgresMode ? null : await readDb();
+  const projectId = await resolveUploadProjectId(user, projectHint, db);
+  if (!projectId) return;
+  const usedBytes = isPostgresMode ? await getPostgresProjectUploadBytes(projectId) : getJsonProjectUploadBytes(db, projectId);
+  if (usedBytes + incomingBytes <= uploadProjectQuotaBytes) return;
+  const error = new Error(`Project upload quota exceeded. Used ${formatBytes(usedBytes)} of ${formatBytes(uploadProjectQuotaBytes)}.`);
+  error.status = 413;
+  throw error;
+}
+
+async function resolveUploadProjectId(user, hint, db = null) {
+  const value = String(hint || "").trim();
+  if (!value) return "";
+  if (value.startsWith("p") && canAccessProject(user, value)) return value;
+  if (isPostgresMode && value) {
+    const equipment = await getPrisma().equipment.findUnique({ where: { id: value }, select: { projectId: true } }).catch(() => null);
+    if (equipment && canAccessProject(user, equipment.projectId)) return equipment.projectId;
+    const record = await getPrisma().inspectionRecord.findUnique({ where: { id: value }, select: { projectId: true } }).catch(() => null);
+    if (record && canAccessProject(user, record.projectId)) return record.projectId;
+  } else if (db && value) {
+    const equipment = (db.equipment || []).find((item) => item.id === value);
+    if (equipment && canAccessProject(user, equipment.projectId)) return equipment.projectId;
+    const record = (db.records || []).find((item) => item.id === value);
+    if (record && canAccessProject(user, record.projectId)) return record.projectId;
+  }
+  return canAccessProject(user, value) ? value : "";
+}
+
+async function getPostgresProjectUploadBytes(projectId) {
+  const result = await getPrisma().attachment.aggregate({
+    where: {
+      OR: [
+        { record: { projectId } },
+        { media: { projectId } }
+      ]
+    },
+    _sum: { size: true }
+  });
+  return Number(result._sum.size || 0);
+}
+
+function getJsonProjectUploadBytes(db, projectId) {
+  const records = (db.records || []).filter((record) => record.projectId === projectId);
+  const media = (db.media || []).filter((item) => item.projectId === projectId);
+  const recordBytes = records.flatMap((record) => record.photos || []).reduce((sum, file) => sum + Number(file?.size || 0), 0);
+  const mediaBytes = media.reduce((sum, item) => sum + Number(item.file?.size || 0), 0);
+  return recordBytes + mediaBytes;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
+async function cleanupOrphanUploads(dryRun = true) {
+  await mkdir(uploadDir, { recursive: true });
+  await mkdir(tempUploadDir, { recursive: true });
+  const referenced = isPostgresMode ? await getPostgresReferencedUploadNames() : getJsonReferencedUploadNames(await readDb());
+  const now = Date.now();
+  const removed = [];
+  const kept = [];
+  const scan = async (directory, isTemp = false) => {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const filePath = path.join(directory, entry.name);
+      const info = await stat(filePath).catch(() => null);
+      if (!info?.isFile()) continue;
+      const oldEnough = now - info.mtimeMs > orphanCleanupGraceMs;
+      const orphan = isTemp || !referenced.has(entry.name);
+      if (orphan && oldEnough) {
+        removed.push({ fileName: entry.name, size: info.size, temp: isTemp });
+        if (!dryRun) await rm(filePath, { force: true });
+      } else {
+        kept.push({ fileName: entry.name, size: info.size, temp: isTemp });
+      }
+    }
+  };
+  await scan(uploadDir, false);
+  await scan(tempUploadDir, true);
+  return {
+    dryRun,
+    removedCount: removed.length,
+    removedBytes: removed.reduce((sum, item) => sum + item.size, 0),
+    keptCount: kept.length,
+    removed
+  };
+}
+
+async function getPostgresReferencedUploadNames() {
+  const attachments = await getPrisma().attachment.findMany({ select: { storagePath: true } });
+  return new Set(attachments.map((item) => path.basename(item.storagePath || "")).filter(Boolean));
+}
+
+function getJsonReferencedUploadNames(db) {
+  const names = [];
+  for (const record of db.records || []) {
+    for (const file of record.photos || []) names.push(path.basename(file?.url || file || ""));
+  }
+  for (const item of db.media || []) {
+    if (item.file?.url) names.push(path.basename(item.file.url));
+  }
+  return new Set(names.filter(Boolean));
 }
 
 function appendMediaRecords(db, equipment, payload) {

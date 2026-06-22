@@ -3776,9 +3776,17 @@ function getAttachmentSrc(photo) {
 function resolveAttachmentUrl(url) {
   if (!url) return "";
   if (/^(data:|blob:|https?:)/i.test(url)) return url;
+  if (url.startsWith("/api/files/")) {
+    try {
+      return `${new URL(API_BASE, window.location.href).origin}${url}`;
+    } catch {
+      return url;
+    }
+  }
   if (!url.startsWith("/uploads/")) return url;
+  const fileName = url.split("/").pop() || "";
   try {
-    return `${new URL(API_BASE, window.location.href).origin}${url}`;
+    return `${new URL(API_BASE, window.location.href).origin}/api/files/${encodeURIComponent(fileName)}`;
   } catch {
     return url;
   }
@@ -3854,6 +3862,7 @@ async function uploadPendingLocalAttachments(records) {
 
 async function uploadAttachmentFiles(files) {
   const formData = new FormData();
+  formData.append("projectId", state.selectedProjectId || "");
   for (const file of files) {
     const uploadFile = file instanceof File || file instanceof Blob
       ? file
