@@ -32,7 +32,7 @@ npm run db:seed:json
 
 The current API defaults to `DATA_STORE=json` so the MVP remains usable while PostgreSQL repositories are migrated route by route.
 
-Use `DATA_STORE=postgres` only after the target endpoint has a Prisma-backed repository. Auth, sessions, `/api/auth/me`, and `/api/bootstrap` now have PostgreSQL read/runtime support. Write-heavy business endpoints still intentionally return `503` in postgres mode instead of silently writing to the JSON file.
+Use `DATA_STORE=postgres` only after the target endpoint has a Prisma-backed repository. Auth, sessions, `/api/auth/me`, `/api/bootstrap`, `/api/sync`, equipment upsert, row update, and point upsert now have PostgreSQL runtime support. Media upload, Excel import, project/user admin, and file upload endpoints are still being migrated.
 
 Health endpoints:
 

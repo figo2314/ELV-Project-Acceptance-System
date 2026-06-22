@@ -19,6 +19,10 @@ import {
   findPostgresUserByUsername,
   getPostgresBootstrapForUser,
   getPostgresUserByToken,
+  syncPostgresRecords,
+  updatePostgresRow,
+  upsertPostgresEquipment,
+  upsertPostgresPoint,
   upgradePostgresPasswordHash
 } from "./postgresRepository.js";
 
@@ -344,6 +348,11 @@ app.get("/api/template/equipment", asyncRoute(async (_request, response) => {
 
 app.post("/api/sync", requireAuth(), async (request, response) => {
   const incoming = Array.isArray(request.body.records) ? request.body.records : [];
+  if (isPostgresMode) {
+    const result = await syncPostgresRecords(request.auth.user, incoming);
+    response.json({ ...result.data, conflicts: result.conflicts });
+    return;
+  }
   const conflicts = [];
   const db = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
@@ -452,6 +461,12 @@ app.post(
 );
 
 app.post("/api/equipment", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
+  if (isPostgresMode) {
+    const result = await upsertPostgresEquipment(request.auth.user, request.body || {}, "eq");
+    if (sendMutationError(response, result)) return;
+    response.status(201).json(result.item);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     const item = validateEquipmentPayload(db, request.body || {}, "eq");
@@ -467,6 +482,12 @@ app.post("/api/equipment", requireAuth(["admin", "manager", "engineer"]), async 
 
 app.post("/api/admin/equipment", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const body = request.body || {};
+  if (isPostgresMode) {
+    const result = await upsertPostgresEquipment(request.auth.user, body, "e");
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     const equipment = validateEquipmentPayload(db, body, "e");
@@ -572,6 +593,12 @@ app.post("/api/admin/media", requireAuth(["admin", "manager", "engineer"]), asyn
 
 app.post("/api/admin/row", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const body = request.body || {};
+  if (isPostgresMode) {
+    const result = await updatePostgresRow(request.auth.user, body);
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     const equipment = db.equipment.find((item) => item.id === body.equipmentId);
@@ -615,6 +642,12 @@ app.post("/api/admin/row", requireAuth(["admin", "manager", "engineer"]), async 
 
 app.post("/api/admin/point", requireAuth(["admin", "manager", "engineer", "field"]), async (request, response) => {
   const body = request.body || {};
+  if (isPostgresMode) {
+    const result = await upsertPostgresPoint(request.auth.user, body);
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     const equipment = db.equipment.find((item) => item.id === body.equipmentId);
