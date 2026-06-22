@@ -125,6 +125,29 @@ export async function appendPostgresAuditLog(user, action, targetType, targetId,
   });
 }
 
+export async function listPostgresAuditLogs(user, filters = {}) {
+  const prisma = getPrisma();
+  const page = clampInteger(filters.page, 1, 100000, 1);
+  const pageSize = clampInteger(filters.pageSize, 10, 500, 50);
+  const where = buildPostgresAuditWhere(user, filters);
+  const [rows, total] = await Promise.all([
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    }),
+    prisma.auditLog.count({ where })
+  ]);
+  return {
+    rows: rows.map(toAuditLog),
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize))
+  };
+}
+
 export async function getPostgresBootstrapForUser(user) {
   const prisma = getPrisma();
   const projectWhere = user?.role === "admin" ? {} : { id: { in: user?.projectIds || [] } };
@@ -163,6 +186,40 @@ export async function getPostgresBootstrapForUser(user) {
     users: users.map(toPublicUser),
     auditLogs: auditLogs.map(toAuditLog)
   };
+}
+
+function buildPostgresAuditWhere(user, filters) {
+  const and = [];
+  const accessibleProjectIds = Array.isArray(user?.projectIds) ? user.projectIds : [];
+  if (user?.role !== "admin") {
+    and.push({ OR: [{ projectId: { in: accessibleProjectIds } }, { userId: user?.id || "" }] });
+  }
+  if (filters.projectId) and.push({ projectId: filters.projectId });
+  if (filters.userId) and.push({ userId: filters.userId });
+  if (filters.action) and.push({ action: filters.action });
+  if (["true", "false"].includes(filters.success)) and.push({ success: filters.success === "true" });
+  const createdAt = {};
+  if (filters.from) createdAt.gte = new Date(filters.from);
+  if (filters.to) createdAt.lte = new Date(filters.to);
+  if (Object.keys(createdAt).length) and.push({ createdAt });
+  if (filters.q) {
+    const contains = String(filters.q).trim();
+    and.push({
+      OR: [
+        { userName: { contains, mode: "insensitive" } },
+        { action: { contains, mode: "insensitive" } },
+        { targetType: { contains, mode: "insensitive" } },
+        { targetId: { contains, mode: "insensitive" } }
+      ]
+    });
+  }
+  return and.length ? { AND: and } : {};
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
 }
 
 export async function upgradePostgresPasswordHash(userId, passwordHash) {

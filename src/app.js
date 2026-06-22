@@ -347,6 +347,7 @@ async function init() {
   }
   await syncRecords(false);
   await bootstrapFromServer();
+  if (state.view === "admin" && state.adminPage === "people") await loadAuditLogs({ page: state.auditPage || 1 }, false);
   render();
 }
 
@@ -388,6 +389,18 @@ function defaultState() {
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
+    auditRows: null,
+    auditPage: 1,
+    auditPageSize: 50,
+    auditTotal: 0,
+    auditTotalPages: 1,
+    auditProjectId: "",
+    auditUserId: "",
+    auditAction: "",
+    auditSuccess: "",
+    auditSearch: "",
+    auditSearchDraft: "",
+    auditLoading: false,
     serverOnline: false,
     authToken: "",
     currentUser: null,
@@ -1792,20 +1805,77 @@ function isUserLocked(user) {
 }
 
 function renderAuditLog() {
-  const logs = state.data.auditLogs || [];
-  if (!logs.length) return `<div class="empty small">No audit records yet</div>`;
+  const logs = state.auditRows || state.data.auditLogs || [];
+  const page = Number(state.auditPage || 1);
+  const totalPages = Number(state.auditTotalPages || 1);
+  const total = Number(state.auditTotal || logs.length || 0);
   return `
-    <div class="audit-list">
-      ${logs.slice(0, 80).map((log) => `
-        <article class="audit-item ${log.success === false ? "failed" : ""}">
-          <span>${escapeHtml(formatDateTime(log.createdAt) || log.createdAt || "")}</span>
-          <strong>${escapeHtml(log.action || "")}</strong>
-          <em>${escapeHtml(log.userName || "Guest")} / ${escapeHtml(log.role || "")}</em>
-          <small>${escapeHtml(log.targetType || "")}: ${escapeHtml(log.targetId || "")}</small>
-        </article>
-      `).join("")}
+    <div class="audit-toolbar">
+      <label>Project
+        <select data-audit-filter="projectId">
+          <option value="">All projects</option>
+          ${(state.data.projects || []).map((project) => option(project.id, project.name, state.auditProjectId || "")).join("")}
+        </select>
+      </label>
+      <label>User
+        <select data-audit-filter="userId">
+          <option value="">All users</option>
+          ${getAuditUserOptions().map((user) => option(user.id, user.name || user.username || user.id, state.auditUserId || "")).join("")}
+        </select>
+      </label>
+      <label>Status
+        <select data-audit-filter="success">
+          ${option("", "All", state.auditSuccess || "")}
+          ${option("true", "Success", state.auditSuccess || "")}
+          ${option("false", "Failed", state.auditSuccess || "")}
+        </select>
+      </label>
+      <label>Action
+        <select data-audit-filter="action">
+          <option value="">All actions</option>
+          ${getAuditActions().map((action) => option(action, action, state.auditAction || "")).join("")}
+        </select>
+      </label>
+      <label class="audit-search">Search
+        <input data-audit-filter="q" value="${escapeHtml(state.auditSearchDraft ?? state.auditSearch ?? "")}" placeholder="Search action, user, target" />
+      </label>
+      <button class="ghost compact" type="button" data-audit-export>Export CSV</button>
+    </div>
+    <div class="audit-meta">
+      <span>${state.auditLoading ? "Loading..." : `${total} records`}</span>
+      <span>Page ${page} / ${totalPages}</span>
+    </div>
+    ${logs.length ? `
+      <div class="audit-list">
+        ${logs.map((log) => `
+          <article class="audit-item ${log.success === false ? "failed" : ""}">
+            <span>${escapeHtml(formatDateTime(log.createdAt) || log.createdAt || "")}</span>
+            <strong>${escapeHtml(log.action || "")}</strong>
+            <em>${escapeHtml(log.userName || "Guest")} / ${escapeHtml(log.role || "")}</em>
+            <small>${escapeHtml(log.targetType || "")}: ${escapeHtml(log.targetId || "")}</small>
+          </article>
+        `).join("")}
+      </div>
+    ` : `<div class="empty small">No audit records found</div>`}
+    <div class="audit-pagination">
+      <button class="ghost compact" type="button" data-audit-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>Previous</button>
+      <select data-audit-filter="pageSize">
+        ${[25, 50, 100, 200].map((size) => option(String(size), `${size} / page`, String(state.auditPageSize || 50))).join("")}
+      </select>
+      <button class="ghost compact" type="button" data-audit-page="${page + 1}" ${page >= totalPages ? "disabled" : ""}>Next</button>
     </div>
   `;
+}
+
+function getAuditUserOptions() {
+  const users = state.data.users?.length
+    ? state.data.users
+    : uniqueBy((state.data.auditLogs || []).map((log) => ({ id: log.userId || log.userName || "", name: log.userName || "Guest", username: log.userName || "Guest" })).filter((user) => user.id), "id");
+  return [...users].sort((a, b) => String(a.name || a.username || a.id).localeCompare(String(b.name || b.username || b.id)));
+}
+
+function getAuditActions() {
+  return [...new Set((state.data.auditLogs || []).map((log) => log.action).filter(Boolean))].sort();
 }
 
 function renderProjectSummary(project) {
@@ -2488,6 +2558,7 @@ function setAdminPage(page) {
   pendingMediaUploadDraft = {};
   mediaUploadSaving = false;
   setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "", dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all", dashboardEntityId: page === "dashboard" ? state.dashboardEntityId : "" });
+  if (page === "people") loadAuditLogs({ page: 1 });
 }
 
 function setView(view) {
@@ -2802,6 +2873,17 @@ function bindEvents() {
   document.querySelectorAll("[data-unlock-user]").forEach((button) => {
     button.addEventListener("click", () => unlockUser(button.dataset.unlockUser));
   });
+  document.querySelectorAll("[data-audit-filter]").forEach((field) => {
+    if (field.dataset.auditFilter === "q") {
+      field.addEventListener("input", () => updateDebouncedSearch("auditSearch", field.value, { auditSearchDraft: field.value }, (value) => updateAuditFilter("q", value)));
+    } else {
+      field.addEventListener("change", () => updateAuditFilter(field.dataset.auditFilter, field.value));
+    }
+  });
+  document.querySelectorAll("[data-audit-page]").forEach((button) => {
+    button.addEventListener("click", () => loadAuditLogs({ page: Number(button.dataset.auditPage) || 1 }));
+  });
+  document.querySelector("[data-audit-export]")?.addEventListener("click", exportAuditLogs);
   bindStatusPickers();
   document.querySelectorAll("[data-field-point-editor]").forEach((form) => {
     form.addEventListener("submit", saveFieldPoint);
@@ -3392,6 +3474,71 @@ async function unlockUser(userId) {
   }
 }
 
+async function loadAuditLogs(patch = {}, shouldRender = true) {
+  const nextState = {
+    auditPage: patch.page || state.auditPage || 1,
+    auditPageSize: patch.pageSize || state.auditPageSize || 50,
+    auditProjectId: patch.projectId ?? state.auditProjectId ?? "",
+    auditUserId: patch.userId ?? state.auditUserId ?? "",
+    auditAction: patch.action ?? state.auditAction ?? "",
+    auditSuccess: patch.success ?? state.auditSuccess ?? "",
+    auditSearch: patch.q ?? state.auditSearch ?? "",
+    auditSearchDraft: patch.q ?? state.auditSearchDraft ?? state.auditSearch ?? "",
+    auditLoading: true
+  };
+  setState(nextState, shouldRender);
+  try {
+    const result = await apiGet(`/audit-logs?${buildAuditQuery(nextState).toString()}`);
+    setState({
+      auditRows: result.rows || [],
+      auditPage: result.page || nextState.auditPage,
+      auditPageSize: result.pageSize || nextState.auditPageSize,
+      auditTotal: result.total || 0,
+      auditTotalPages: result.totalPages || 1,
+      auditLoading: false,
+      serverOnline: true
+    }, shouldRender);
+  } catch (error) {
+    console.warn("Audit log load failed.", error);
+    setState({ auditLoading: false, serverOnline: false }, shouldRender);
+    flash(error.message || t("serverOffline"));
+  }
+}
+
+function updateAuditFilter(key, value) {
+  const patch = { page: 1 };
+  if (key === "projectId") patch.projectId = value;
+  if (key === "userId") patch.userId = value;
+  if (key === "action") patch.action = value;
+  if (key === "success") patch.success = value;
+  if (key === "pageSize") patch.pageSize = Number(value) || 50;
+  if (key === "q") patch.q = value;
+  loadAuditLogs(patch);
+}
+
+function exportAuditLogs() {
+  const query = buildAuditQuery({ ...state, page: 1, pageSize: 500 });
+  query.set("format", "csv");
+  window.open(`${API_BASE}/audit-logs?${query.toString()}`, "_blank", "noopener,noreferrer");
+}
+
+function buildAuditQuery(source) {
+  const query = new URLSearchParams();
+  query.set("page", String(source.page || source.auditPage || 1));
+  query.set("pageSize", String(source.pageSize || source.auditPageSize || 50));
+  const filters = [
+    ["projectId", source.auditProjectId ?? source.projectId],
+    ["userId", source.auditUserId ?? source.userId],
+    ["action", source.auditAction ?? source.action],
+    ["success", source.auditSuccess ?? source.success],
+    ["q", source.auditSearch ?? source.q]
+  ];
+  filters.forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  return query;
+}
+
 function translateComment() {
   const textarea = document.querySelector("textarea[name='comments']");
   if (!textarea?.value.trim()) return;
@@ -3732,6 +3879,16 @@ function summarizeStatus(records) {
 
 function option(value, label, selected) {
   return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+}
+
+function uniqueBy(items, key) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const value = item?.[key];
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
 }
 
 function renderAttachmentThumb(photo) {

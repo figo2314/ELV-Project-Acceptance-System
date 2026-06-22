@@ -153,9 +153,16 @@ async function main() {
   assert(metrics.dataStore === "postgres", "Metrics did not report postgres mode.");
   assert(metrics.failedLogins >= 1, "Metrics did not record failed logins.");
 
+  const auditLogs = await apiGet("/audit-logs?page=1&pageSize=5", token);
+  assert(Array.isArray(auditLogs.rows), "Audit log endpoint did not return rows.");
+  assert(auditLogs.page === 1, "Audit log endpoint did not return page metadata.");
+  assert(auditLogs.total >= 1, "Audit log endpoint did not return recorded activity.");
+  const auditCsv = await apiRawGet("/audit-logs?format=csv&pageSize=5", token);
+  assert(auditCsv.text.includes("createdAt,success,action,userName"), "Audit CSV export did not include expected headers.");
+
   console.log(JSON.stringify({
     ok: true,
-    checks: ["ready", "login", "point", "sync", "media", "upload", "file-download", "import", "metrics"],
+    checks: ["ready", "login", "point", "sync", "media", "upload", "file-download", "import", "metrics", "audit-logs"],
     projectCount: imported.data.projects.length,
     recordCount: imported.data.records.length,
     requestsTotal: metrics.requestsTotal,

@@ -55,7 +55,7 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 - [x] Add structured request logging with request IDs.
 - [x] Add `/api/ready` readiness checks for database and storage.
 - [x] Add metrics for request latency, failed logins, sync conflicts, upload failures, and import failures.
-- [ ] Add audit log pagination and export.
+- [x] Add audit log pagination and export.
 - [x] Add load tests for 100 concurrent users covering login, dashboard, sync, import preview, and upload.
 
 ## P2 - Deployment

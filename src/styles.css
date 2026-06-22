@@ -544,6 +544,54 @@ textarea {
   min-height: 360px;
 }
 
+.audit-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(130px, 1fr)) minmax(220px, 1.6fr) auto;
+  margin-bottom: 12px;
+}
+
+.audit-toolbar label {
+  color: #64748b;
+  display: grid;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.audit-toolbar input,
+.audit-toolbar select {
+  min-height: 38px;
+}
+
+.audit-search {
+  min-width: 220px;
+}
+
+.audit-meta,
+.audit-pagination {
+  align-items: center;
+  color: #64748b;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.audit-pagination {
+  justify-content: flex-end;
+  margin: 12px 0 0;
+}
+
+.audit-pagination select {
+  min-height: 34px;
+  width: auto;
+}
+
 .audit-list {
   display: grid;
   gap: 8px;
@@ -561,6 +609,12 @@ textarea {
   gap: 8px;
   grid-template-columns: 160px minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(120px, 0.8fr);
   padding: 10px 12px;
+}
+
+.audit-item:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
 }
 
 .audit-item.failed {

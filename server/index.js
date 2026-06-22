@@ -20,6 +20,7 @@ import {
   findPostgresUserByUsername,
   getPostgresBootstrapForUser,
   getPostgresUserByToken,
+  listPostgresAuditLogs,
   importPostgresEquipmentRows,
   registerPostgresFailedLogin,
   resetPostgresLoginFailures,
@@ -518,6 +519,20 @@ app.get("/api/bootstrap", requireAuth(), asyncRoute(async (request, response) =>
     return;
   }
   response.json(filterDbForUser(await readDb(), request.auth.user));
+}));
+
+app.get("/api/audit-logs", requireAuth(), asyncRoute(async (request, response) => {
+  const filters = parseAuditLogQuery(request.query);
+  const result = isPostgresMode
+    ? await listPostgresAuditLogs(request.auth.user, filters)
+    : listJsonAuditLogs({ auditLogs: filterAuditLogsForUser(await readDb(), request.auth.user) }, filters);
+  if (filters.format === "csv") {
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader("Content-Disposition", `attachment; filename="audit-logs-${new Date().toISOString().slice(0, 10)}.csv"`);
+    response.send(formatAuditLogsCsv(result.rows));
+    return;
+  }
+  response.json(result);
 }));
 
 app.get("/api/files/:fileName", requireAuth(), asyncRoute(async (request, response) => {
@@ -1505,6 +1520,81 @@ function filterDbForUser(db, user) {
     auditLogs: (db.auditLogs || []).filter((item) => allowedProjects.has(item.projectId) || item.userId === user.id),
     users: []
   }, { includeUsers: false });
+}
+
+function filterAuditLogsForUser(db, user) {
+  const logs = Array.isArray(db.auditLogs) ? db.auditLogs : [];
+  if (!user || user.role === "admin") return logs;
+  const allowedProjects = new Set(Array.isArray(user.projectIds) ? user.projectIds : []);
+  return logs.filter((item) => allowedProjects.has(item.projectId) || item.userId === user.id);
+}
+
+function parseAuditLogQuery(query = {}) {
+  const from = parseDateQuery(query.from, false);
+  const to = parseDateQuery(query.to, true);
+  return {
+    page: clampInteger(query.page, 1, 100000, 1),
+    pageSize: clampInteger(query.pageSize, 10, 500, 50),
+    projectId: String(query.projectId || "").trim(),
+    userId: String(query.userId || "").trim(),
+    action: String(query.action || "").trim(),
+    success: ["true", "false"].includes(String(query.success || "")) ? String(query.success) : "",
+    from,
+    to,
+    q: String(query.q || "").trim().slice(0, 120),
+    format: String(query.format || "").toLowerCase() === "csv" ? "csv" : "json"
+  };
+}
+
+function parseDateQuery(value, endOfDay) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`) : new Date(raw);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function listJsonAuditLogs(db, filters) {
+  const page = filters.page;
+  const pageSize = filters.pageSize;
+  const filtered = (db.auditLogs || [])
+    .filter((log) => auditLogMatchesFilters(log, filters))
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const total = filtered.length;
+  return {
+    rows: filtered.slice((page - 1) * pageSize, page * pageSize),
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize))
+  };
+}
+
+function auditLogMatchesFilters(log, filters) {
+  if (filters.projectId && log.projectId !== filters.projectId) return false;
+  if (filters.userId && log.userId !== filters.userId) return false;
+  if (filters.action && log.action !== filters.action) return false;
+  if (filters.success !== "" && String(log.success !== false) !== filters.success) return false;
+  const createdAt = new Date(log.createdAt || 0).getTime();
+  if (filters.from && createdAt < new Date(filters.from).getTime()) return false;
+  if (filters.to && createdAt > new Date(filters.to).getTime()) return false;
+  if (filters.q) {
+    const text = [log.userName, log.role, log.action, log.targetType, log.targetId, log.projectId, JSON.stringify(log.details || {})].join(" ").toLowerCase();
+    if (!text.includes(filters.q.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function formatAuditLogsCsv(rows) {
+  const headers = ["createdAt", "success", "action", "userName", "role", "targetType", "targetId", "projectId", "details"];
+  return [
+    headers.join(","),
+    ...rows.map((row) => headers.map((key) => csvCell(key === "details" ? JSON.stringify(row.details || {}) : row[key])).join(","))
+  ].join("\n");
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function sanitizeDbForClient(db, options = {}) {

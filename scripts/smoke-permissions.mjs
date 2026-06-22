@@ -23,6 +23,10 @@ async function main() {
   await expectStatus("GET", "/metrics", null, sessions.manager.token, 403);
   await expectStatus("GET", "/metrics", null, sessions.engineer.token, 403);
   await expectStatus("GET", "/metrics", null, sessions.field.token, 403);
+  await expectStatus("GET", "/audit-logs?page=1&pageSize=5", null, sessions.admin.token, 200);
+  await expectStatus("GET", "/audit-logs?page=1&pageSize=5", null, sessions.manager.token, 200);
+  await expectStatus("GET", "/audit-logs?page=1&pageSize=5", null, sessions.engineer.token, 200);
+  await expectStatus("GET", "/audit-logs?page=1&pageSize=5", null, sessions.field.token, 200);
 
   await expectStatus("POST", "/admin/user", {
     username: `denied-${Date.now()}`,
@@ -73,6 +77,7 @@ async function main() {
     ok: true,
     checks: [
       "metrics-admin-only",
+      "audit-log-project-scoped-read",
       "user-management-admin-only",
       "import-manager-admin-only",
       "storage-cleanup-admin-only",
