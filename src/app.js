@@ -2,6 +2,7 @@ const STORAGE_KEY = "elv-acceptance-offline-v2";
 const ATTACHMENT_DB_NAME = "elv-acceptance-attachments";
 const ATTACHMENT_STORE = "attachments";
 const MEDIA_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
+const AUTH_TOKEN_KEY = "elv-acceptance-auth-token";
 const API_BASE =
   window.__ELV_API_BASE__ ||
   import.meta.env?.VITE_API_BASE ||
@@ -339,6 +340,11 @@ init();
 
 async function init() {
   render();
+  if (state.authToken) await restoreSession();
+  if (!state.authToken) {
+    render();
+    return;
+  }
   await syncRecords(false);
   await bootstrapFromServer();
   render();
@@ -382,6 +388,9 @@ function defaultState() {
     fieldAddPointOpen: false,
     importPreview: null,
     serverOnline: false,
+    authToken: localStorage.getItem(AUTH_TOKEN_KEY) || "",
+    currentUser: null,
+    loginUsername: "admin",
     data: structuredClone(fallbackData)
   };
 }
@@ -397,6 +406,8 @@ function loadState() {
     }
     parsed.mediaUploadOpen = false;
     parsed.mediaUploadEquipmentId = "";
+    parsed.authToken = localStorage.getItem(AUTH_TOKEN_KEY) || parsed.authToken || "";
+    if (!parsed.authToken) parsed.currentUser = null;
     return { ...defaultState(), ...parsed };
   } catch (error) {
     console.warn("Unable to load saved ELV state. Falling back to defaults.", error);
@@ -411,9 +422,21 @@ function loadState() {
 
 function saveState() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const { authToken, ...persistedState } = state;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
   } catch (error) {
     console.warn("Unable to persist ELV state. Browser storage may be full.", error);
+  }
+}
+
+async function restoreSession() {
+  try {
+    const response = await apiGet("/auth/me");
+    setData(response.data);
+    setState({ currentUser: response.user, serverOnline: true }, false);
+  } catch {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    setState({ authToken: "", currentUser: null, serverOnline: false }, false);
   }
 }
 
@@ -465,7 +488,7 @@ function render() {
   document.querySelector("#app").innerHTML = `
     <main class="shell">
       ${renderTopbar()}
-      ${state.view === "field" ? renderField() : renderAdmin()}
+      ${state.authToken ? (state.view === "field" ? renderField() : renderAdmin()) : renderLogin()}
       ${renderIssueModal()}
       ${renderFieldAddPointModal()}
       ${renderMediaUploadModal()}
@@ -476,17 +499,40 @@ function render() {
   hydrateLocalAttachmentImages();
 }
 
+function renderLogin() {
+  return `
+    <section class="login-shell">
+      <form class="login-card" data-login-form>
+        <div>
+          <p class="eyebrow">Access Control</p>
+          <h2>Sign in to ELV Acceptance</h2>
+          <span>Demo users: admin/admin123, manager/manager123, engineer/engineer123, field/field123</span>
+        </div>
+        <label>Username
+          <input name="username" value="${escapeHtml(state.loginUsername || "admin")}" autocomplete="username" />
+        </label>
+        <label>Password
+          <input name="password" type="password" value="admin123" autocomplete="current-password" />
+        </label>
+        <button class="primary" type="submit">Login</button>
+      </form>
+    </section>
+  `;
+}
+
 function renderTopbar() {
   const pendingSync = state.data.records.filter((record) => record.sync === "pending").length;
   const isOnline = navigator.onLine && state.serverOnline;
   const syncText = pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced");
+  const user = state.currentUser;
   return `
     <header class="topbar">
       <div class="topbar-brand">
         <div class="brand-row"><span class="logo-mark">${t("logoText")}</span><h1>${t("appName")}</h1></div>
       </div>
-      ${state.view === "admin" ? `<nav class="top-nav">${renderAdminNavItem("dashboard", t("navDashboard"))}${renderAdminNavItem("data", t("navData"))}${renderAdminNavItem("media", t("navMedia"))}${renderAdminNavItem("import", t("navImport"))}${renderAdminNavItem("issues", t("navIssues"))}${renderAdminNavItem("people", t("navPeople"))}</nav>` : ""}
+      ${state.view === "admin" && state.authToken ? `<nav class="top-nav">${renderAdminNav()}</nav>` : ""}
       <div class="topbar-actions">
+        ${user ? `<span class="user-pill"><strong>${escapeHtml(user.name || user.username)}</strong><small>${escapeHtml(user.role)}</small></span>` : ""}
         <span class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}">
           <i></i>
           <span>
@@ -496,12 +542,25 @@ function renderTopbar() {
         </span>
         <div class="actions">
           <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
-          <button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>
-          <button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin">${t("admin")}</button>
+          ${state.authToken ? `<button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>` : ""}
+          ${state.authToken && canUseAdminView() ? `<button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin">${t("admin")}</button>` : ""}
+          ${state.authToken ? `<button class="icon-btn" data-action="logout" title="Logout">Logout</button>` : ""}
         </div>
       </div>
     </header>
   `;
+}
+
+function renderAdminNav() {
+  const pages = [
+    ["dashboard", t("navDashboard"), ["admin", "manager", "engineer"]],
+    ["data", t("navData"), ["admin", "manager", "engineer"]],
+    ["media", t("navMedia"), ["admin", "manager", "engineer"]],
+    ["import", t("navImport"), ["admin", "manager"]],
+    ["issues", t("navIssues"), ["admin", "manager", "engineer"]],
+    ["people", t("navPeople"), ["admin", "manager", "engineer"]]
+  ];
+  return pages.filter(([, , roles]) => hasRole(roles)).map(([page, label]) => renderAdminNavItem(page, label)).join("");
 }
 
 function renderField() {
@@ -1209,6 +1268,9 @@ function renderAdminNavItem(page, label) {
 }
 
 function renderAdminPage() {
+  if (!canAccessAdminPage(state.adminPage)) {
+    state.adminPage = "dashboard";
+  }
   if (state.adminPage === "data") {
     const treeWidth = getAdminTreeWidth();
     return `
@@ -1632,12 +1694,69 @@ function renderIssuesPage() {
 function renderPeoplePage() {
   const people = getPeopleStats();
   return `
-    <section class="panel">
-      <div class="section-title">${t("personStats")}</div>
-      <div class="people">
-        ${people.map((person) => `<div><strong>${escapeHtml(person.name || "-")}</strong><span>${person.done}/${person.total}</span><progress value="${person.done}" max="${person.total}"></progress></div>`).join("")}
-      </div>
+    <section class="people-admin-grid">
+      <section class="panel">
+        <div class="section-title">${t("personStats")}</div>
+        <div class="people">
+          ${people.map((person) => `<div><strong>${escapeHtml(person.name || "-")}</strong><span>${person.done}/${person.total}</span><progress value="${person.done}" max="${person.total}"></progress></div>`).join("")}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="section-title">Access Control</div>
+        ${renderUserManagement()}
+      </section>
+      <section class="panel audit-panel">
+        <div class="section-title">Audit Log</div>
+        ${renderAuditLog()}
+      </section>
     </section>
+  `;
+}
+
+function renderUserManagement() {
+  const users = state.data.users || [];
+  return `
+    <div class="user-management">
+      ${users.map(renderUserRow).join("")}
+      ${canManageUsers() ? renderUserRow({ id: "", username: "", name: "", role: "field", active: true, projectIds: [] }, true) : ""}
+    </div>
+  `;
+}
+
+function renderUserRow(user, isNew = false) {
+  const disabled = canManageUsers() ? "" : "disabled";
+  return `
+    <form class="user-row" data-user-editor="${escapeHtml(user.id || "")}">
+      <input name="name" value="${escapeHtml(user.name || "")}" placeholder="Name" ${disabled} />
+      <input name="username" value="${escapeHtml(user.username || "")}" placeholder="Username" ${disabled} />
+      <select name="role" ${disabled}>
+        ${["admin", "manager", "engineer", "field"].map((role) => option(role, role, user.role || "field")).join("")}
+      </select>
+      <input name="projectIds" value="${escapeHtml((user.projectIds || []).join(","))}" placeholder="Project IDs e.g. p1,p2" ${disabled} />
+      <input name="password" type="password" placeholder="${isNew ? "Password or default changeme123" : "Reset password"}" ${disabled} />
+      <select name="active" ${disabled}>
+        ${option("true", "Active", user.active !== false ? "true" : "false")}
+        ${option("false", "Inactive", user.active === false ? "false" : "true")}
+      </select>
+      ${canManageUsers() ? `<button class="ghost" type="submit">${isNew ? "Add" : t("saveChanges")}</button>` : `<span class="badge">${escapeHtml(user.role || "")}</span>`}
+    </form>
+  `;
+}
+
+function renderAuditLog() {
+  const logs = state.data.auditLogs || [];
+  if (!logs.length) return `<div class="empty small">No audit records yet</div>`;
+  return `
+    <div class="audit-list">
+      ${logs.slice(0, 80).map((log) => `
+        <article class="audit-item ${log.success === false ? "failed" : ""}">
+          <span>${escapeHtml(formatDateTime(log.createdAt) || log.createdAt || "")}</span>
+          <strong>${escapeHtml(log.action || "")}</strong>
+          <em>${escapeHtml(log.userName || "Guest")} / ${escapeHtml(log.role || "")}</em>
+          <small>${escapeHtml(log.targetType || "")}: ${escapeHtml(log.targetId || "")}</small>
+        </article>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -2251,7 +2370,48 @@ function handleEscapeKey(event) {
   if (state.selectedIssueId) closeIssueDetail();
 }
 
+async function login(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  try {
+    const response = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw await createApiError(response, "/auth/login");
+    const body = await response.json();
+    localStorage.setItem(AUTH_TOKEN_KEY, body.token);
+    setState({
+      authToken: body.token,
+      currentUser: body.user,
+      loginUsername: payload.username || "",
+      data: normalizeSelection(body.data),
+      serverOnline: true,
+      toast: ""
+    });
+  } catch (error) {
+    console.warn("Login failed.", error);
+    flash(error.message || "Login failed");
+  }
+}
+
+async function logout() {
+  try {
+    if (state.authToken) await apiPost("/auth/logout", {});
+  } catch {
+    // Logout should always clear the local session.
+  }
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  setState({ authToken: "", currentUser: null, view: "field", toast: "" });
+}
+
 function setAdminPage(page) {
+  if (!canAccessAdminPage(page)) {
+    flash("Permission denied");
+    return;
+  }
   if (mediaUploadSaving) {
     flash(t("uploadInProgress"));
     return;
@@ -2263,6 +2423,10 @@ function setAdminPage(page) {
 }
 
 function setView(view) {
+  if (view === "admin" && !canUseAdminView()) {
+    flash("Permission denied");
+    return;
+  }
   if (mediaUploadSaving) {
     flash(t("uploadInProgress"));
     return;
@@ -2271,6 +2435,30 @@ function setView(view) {
   pendingMediaUploadDraft = {};
   mediaUploadSaving = false;
   setState({ view, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "" });
+}
+
+function hasRole(allowedRoles) {
+  return allowedRoles.includes(state.currentUser?.role);
+}
+
+function canUseAdminView() {
+  return hasRole(["admin", "manager", "engineer"]);
+}
+
+function canAccessAdminPage(page) {
+  const access = {
+    dashboard: ["admin", "manager", "engineer"],
+    data: ["admin", "manager", "engineer"],
+    media: ["admin", "manager", "engineer"],
+    import: ["admin", "manager"],
+    issues: ["admin", "manager", "engineer"],
+    people: ["admin", "manager", "engineer"]
+  };
+  return hasRole(access[page] || ["admin"]);
+}
+
+function canManageUsers() {
+  return hasRole(["admin"]);
 }
 
 function setDashboardFilter(filter) {
@@ -2395,6 +2583,8 @@ function bindIssueDetailEvents() {
 }
 
 function bindEvents() {
+  document.querySelector("[data-login-form]")?.addEventListener("submit", login);
+  document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
@@ -2515,6 +2705,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-row-editor]").forEach((form) => {
     form.addEventListener("submit", saveDataRow);
+  });
+  document.querySelectorAll("[data-user-editor]").forEach((form) => {
+    form.addEventListener("submit", saveUser);
   });
   bindStatusPickers();
   document.querySelectorAll("[data-field-point-editor]").forEach((form) => {
@@ -2888,6 +3081,7 @@ function updateRecord(recordId, patch) {
 }
 
 async function syncRecords(showToast) {
+  if (!state.authToken) return;
   const pending = getPendingRecords();
   if (!pending.length) {
     if (showToast) flash(t("synced"));
@@ -2904,9 +3098,9 @@ async function syncRecords(showToast) {
     const data = mergeLocalPendingRecords(serverData, uploadResult.records, conflicts);
     setState({ data: normalizeSelection(data), conflicts, serverOnline: true });
     if (showToast) flash(conflicts.length ? t("syncConflicts") : t("synced"));
-  } catch {
+  } catch (error) {
     setState({ serverOnline: false });
-    if (showToast) flash(t("serverOffline"));
+    if (showToast) flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
   }
 }
 
@@ -2958,8 +3152,8 @@ async function commitValidatedImport() {
     setData(response.data);
     setState({ importPreview: null });
     flash(`${t("importSuccess")}: ${response.importedCount}`);
-  } catch {
-    flash(t("serverOffline"));
+  } catch (error) {
+    flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
   }
 }
 
@@ -2974,8 +3168,8 @@ async function saveAdminEditor(event) {
     const response = await apiPost(endpoint, payload);
     setData(response);
     flash(t("updateSuccess"));
-  } catch {
-    flash(t("serverOffline"));
+  } catch (error) {
+    flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
   }
 }
 
@@ -2998,8 +3192,8 @@ async function saveFieldPoint(event) {
       toast: t("pointSaved")
     });
     window.setTimeout(() => setState({ toast: "" }), 1800);
-  } catch {
-    flash(t("serverOffline"));
+  } catch (error) {
+    flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
   }
 }
 
@@ -3077,6 +3271,24 @@ async function saveDataRow(event) {
   }
 }
 
+async function saveUser(event) {
+  event.preventDefault();
+  if (!canManageUsers()) return;
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  if (form.dataset.userEditor) payload.id = form.dataset.userEditor;
+  payload.active = payload.active !== "false";
+  payload.projectIds = String(payload.projectIds || "").split(",").map((item) => item.trim()).filter(Boolean);
+  if (!payload.password) delete payload.password;
+  try {
+    const response = await apiPost("/admin/user", payload);
+    setData(response);
+    flash(t("updateSuccess"));
+  } catch (error) {
+    flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
+  }
+}
+
 function translateComment() {
   const textarea = document.querySelector("textarea[name='comments']");
   if (!textarea?.value.trim()) return;
@@ -3084,7 +3296,7 @@ function translateComment() {
 }
 
 async function apiGet(path) {
-  const response = await fetch(`${API_BASE}${path}`);
+  const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
   if (!response.ok) throw await createApiError(response, path);
   return response.json();
 }
@@ -3092,7 +3304,7 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body)
   });
   if (!response.ok) throw await createApiError(response, path);
@@ -3102,10 +3314,15 @@ async function apiPost(path, body) {
 async function apiFormPost(path, formData) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    headers: authHeaders(),
     body: formData
   });
   if (!response.ok) throw await createApiError(response, path);
   return response.json();
+}
+
+function authHeaders() {
+  return state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {};
 }
 
 async function createApiError(response, path) {
@@ -3127,6 +3344,11 @@ async function createApiError(response, path) {
   error.status = response.status;
   error.path = path;
   error.detail = detail;
+  if (response.status === 401) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    state = { ...state, authToken: "", currentUser: null };
+    saveState();
+  }
   return error;
 }
 

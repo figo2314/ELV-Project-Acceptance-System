@@ -1,5 +1,5 @@
 import express from "express";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -20,6 +20,14 @@ const maxUploadFileBytes = 50 * 1024 * 1024;
 const maxUploadTotalBytes = 100 * 1024 * 1024;
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
+const sessions = new Map();
+const roles = ["admin", "manager", "engineer", "field"];
+const defaultUsers = [
+  { id: "u-admin", username: "admin", name: "System Admin", role: "admin", password: "admin123", active: true, projectIds: [] },
+  { id: "u-manager", username: "manager", name: "Project Manager", role: "manager", password: "manager123", active: true, projectIds: ["p1", "p2"] },
+  { id: "u-engineer", username: "engineer", name: "Site Engineer", role: "engineer", password: "engineer123", active: true, projectIds: ["p1"] },
+  { id: "u-field", username: "field", name: "Field User", role: "field", password: "field123", active: true, projectIds: ["p1"] }
+];
 
 const projectAliases = ["Project", "項目", "项目"];
 const locationAliases = ["Location", "Area", "位置", "地點", "地点"];
@@ -60,7 +68,7 @@ const upload = multer({
 app.use((request, response, next) => {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (request.method === "OPTIONS") {
     response.sendStatus(204);
     return;
@@ -108,12 +116,65 @@ const asyncRoute = (handler) => async (request, response) => {
   }
 };
 
+const requireAuth = (allowedRoles = roles) => async (request, response, next) => {
+  try {
+    const db = await readDb();
+    const token = getBearerToken(request);
+    const user = getUserFromRequest(request, db);
+    if (!user) {
+      response.status(401).json({ error: "Login required." });
+      return;
+    }
+    if (!allowedRoles.includes(user.role)) {
+      appendAuditLog(db, user, "permission.denied", request.method, request.path, { allowedRoles }, false);
+      await writeDb(db);
+      response.status(403).json({ error: "Permission denied." });
+      return;
+    }
+    request.auth = { token, user };
+    next();
+  } catch (error) {
+    sendApiError(response, error);
+  }
+};
+
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true, time: Date.now() });
 });
 
-app.get("/api/bootstrap", async (_request, response) => {
-  response.json(await readDb());
+app.post("/api/auth/login", asyncRoute(async (request, response) => {
+  const username = String(request.body?.username || "").trim().toLowerCase();
+  const password = String(request.body?.password || "");
+  const db = await readDb();
+  const user = db.users.find((item) => item.username.toLowerCase() === username && item.active !== false);
+  if (!user || user.passwordHash !== hashPassword(password)) {
+    appendAuditLog(db, null, "login.failed", "auth", username || "unknown", { username }, false);
+    await writeDb(db);
+    response.status(401).json({ error: "Invalid username or password." });
+    return;
+  }
+  const token = createSession(user);
+  appendAuditLog(db, user, "login.success", "auth", user.id);
+  await writeDb(db);
+  response.json({ token, user: publicUser(user), data: filterDbForUser(db, user) });
+}));
+
+app.post("/api/auth/logout", requireAuth(), asyncRoute(async (request, response) => {
+  sessions.delete(request.auth.token);
+  const db = await readDb();
+  appendAuditLog(db, request.auth.user, "logout", "auth", request.auth.user.id);
+  await writeDb(db);
+  response.json({ ok: true });
+}));
+
+app.get("/api/auth/me", requireAuth(), asyncRoute(async (request, response) => {
+  const db = await readDb();
+  const user = db.users.find((item) => item.id === request.auth.user.id && item.active !== false);
+  response.json({ user: publicUser(user), data: filterDbForUser(db, user) });
+}));
+
+app.get("/api/bootstrap", requireAuth(), async (request, response) => {
+  response.json(filterDbForUser(await readDb(), request.auth.user));
 });
 
 app.get("/api/template/equipment", (_request, response) => {
@@ -167,15 +228,21 @@ app.get("/api/template/equipment", (_request, response) => {
   response.send(buffer);
 });
 
-app.post("/api/sync", async (request, response) => {
+app.post("/api/sync", requireAuth(), async (request, response) => {
   const incoming = Array.isArray(request.body.records) ? request.body.records : [];
   const conflicts = [];
   const db = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     for (const record of incoming) {
+      if (!canAccessProject(user, record.projectId)) {
+        conflicts.push({ local: record, server: null, error: "Permission denied." });
+        continue;
+      }
       const index = db.records.findIndex((item) => item.id === record.id);
       const nextRecord = { ...record, sync: "synced", serverUpdatedAt: Date.now() };
       if (index === -1) {
         db.records.push(nextRecord);
+        appendAuditLog(db, user, "record.create", "record", nextRecord.id, { projectId: nextRecord.projectId, status: nextRecord.status });
         continue;
       }
 
@@ -186,14 +253,15 @@ app.post("/api/sync", async (request, response) => {
         continue;
       }
       db.records[index] = nextRecord;
+      appendAuditLog(db, user, "record.sync", "record", nextRecord.id, { projectId: nextRecord.projectId, status: nextRecord.status });
     }
 
     return db;
   });
-  response.json({ ...db, conflicts });
+  response.json({ ...filterDbForUser(db, request.auth.user), conflicts });
 });
 
-app.post("/api/attachments", upload.array("files", maxUploadFiles), asyncRoute(async (request, response) => {
+app.post("/api/attachments", requireAuth(), upload.array("files", maxUploadFiles), asyncRoute(async (request, response) => {
   const multipartFiles = Array.isArray(request.files) ? request.files : [];
   const files = multipartFiles.length ? multipartFiles : Array.isArray(request.body.files) ? request.body.files : [];
   if (!files.length) {
@@ -216,6 +284,7 @@ app.post("/api/attachments", upload.array("files", maxUploadFiles), asyncRoute(a
 
 app.post(
   "/api/admin/media-upload",
+  requireAuth(["admin", "manager", "engineer"]),
   upload.array("files", maxUploadFiles),
   asyncRoute(async (request, response) => {
     const body = request.body || {};
@@ -239,9 +308,11 @@ app.post(
       }
 
       const result = await withDbMutation(async (db) => {
+        const user = getFreshUser(db, request.auth.user);
         db.media = Array.isArray(db.media) ? db.media : [];
         const equipment = db.equipment.find((item) => item.id === body.equipmentId);
         if (!equipment) return mutationError(404, "Equipment not found.");
+        if (!canAccessProject(user, equipment.projectId)) return mutationError(403, "Permission denied.");
         appendMediaRecords(db, equipment, {
           category: body.category,
           title: body.title,
@@ -249,13 +320,15 @@ app.post(
           comments,
           files: savedFiles
         });
+        appendAuditLog(db, user, "media.upload", "equipment", equipment.id, { projectId: equipment.projectId, files: savedFiles.length, category: body.category });
         return db;
       });
       if (sendMutationError(response, result)) {
         await deleteUploadedFiles(savedFiles);
         return;
       }
-      response.json(result);
+
+  response.json(filterDbForUser(result, request.auth.user));
     } catch (error) {
       await deleteUploadedFiles(savedFiles);
       throw error;
@@ -263,22 +336,27 @@ app.post(
   })
 );
 
-app.post("/api/equipment", async (request, response) => {
+app.post("/api/equipment", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     const item = validateEquipmentPayload(db, request.body || {}, "eq");
     if (item.mutationError) return item;
+    if (!canAccessProject(user, item.projectId)) return mutationError(403, "Permission denied.");
     db.equipment.push(item);
+    appendAuditLog(db, user, "equipment.create", "equipment", item.id, { projectId: item.projectId, name: item.name });
     return item;
   });
   if (sendMutationError(response, result)) return;
   response.status(201).json(result);
 });
 
-app.post("/api/admin/equipment", async (request, response) => {
+app.post("/api/admin/equipment", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const body = request.body || {};
   const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     const equipment = validateEquipmentPayload(db, body, "e");
     if (equipment.mutationError) return equipment;
+    if (!canAccessProject(user, equipment.projectId)) return mutationError(403, "Permission denied.");
     const index = db.equipment.findIndex((item) => item.id === equipment.id);
     if (index === -1) {
       db.equipment.push(equipment);
@@ -293,52 +371,99 @@ app.post("/api/admin/equipment", async (request, response) => {
       record.serverUpdatedAt = Date.now();
     }
 
+    appendAuditLog(db, user, index === -1 ? "equipment.create" : "equipment.update", "equipment", equipment.id, { projectId: equipment.projectId, name: equipment.name });
     return db;
   });
   if (sendMutationError(response, result)) return;
-  response.json(result);
+
+  response.json(filterDbForUser(result, request.auth.user));
 });
 
-app.post("/api/admin/project", async (request, response) => {
+app.post("/api/admin/project", requireAuth(["admin", "manager"]), async (request, response) => {
   const body = request.body || {};
   const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     const index = db.projects.findIndex((item) => item.id === body.id);
     if (index === -1) return mutationError(404, "Project not found.");
+    if (!canAccessProject(user, body.id)) return mutationError(403, "Permission denied.");
     db.projects[index] = {
       ...db.projects[index],
       name: body.name || db.projects[index].name,
       client: body.client ?? db.projects[index].client,
       manager: body.manager ?? db.projects[index].manager
     };
+    appendAuditLog(db, user, "project.update", "project", body.id, { projectId: body.id, manager: db.projects[index].manager });
     return db;
   });
   if (sendMutationError(response, result)) return;
-  response.json(result);
+
+  response.json(filterDbForUser(result, request.auth.user));
 });
 
-app.post("/api/admin/media", async (request, response) => {
+app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) => {
   const body = request.body || {};
   const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
+    const username = String(body.username || "").trim().toLowerCase();
+    const name = String(body.name || username || "User").trim();
+    const role = roles.includes(body.role) ? body.role : "field";
+    const projectIds = Array.isArray(body.projectIds)
+      ? body.projectIds.filter((id) => db.projects.some((project) => project.id === id))
+      : String(body.projectIds || "").split(",").map((id) => id.trim()).filter((id) => db.projects.some((project) => project.id === id));
+    if (!username) return mutationError(400, "Username is required.");
+    const existingIndex = db.users.findIndex((item) => item.id === body.id || item.username.toLowerCase() === username);
+    const nextUser = {
+      id: existingIndex === -1 ? createId("u") : db.users[existingIndex].id,
+      username,
+      name,
+      role,
+      active: body.active === false || body.active === "false" ? false : true,
+      projectIds: role === "admin" ? [] : projectIds,
+      createdAt: existingIndex === -1 ? new Date().toISOString() : db.users[existingIndex].createdAt,
+      passwordHash: db.users[existingIndex]?.passwordHash || hashPassword(body.password || "changeme123")
+    };
+    if (body.password) nextUser.passwordHash = hashPassword(String(body.password));
+    if (existingIndex === -1) {
+      db.users.push(nextUser);
+    } else {
+      db.users[existingIndex] = { ...db.users[existingIndex], ...nextUser };
+    }
+    appendAuditLog(db, user, existingIndex === -1 ? "user.create" : "user.update", "user", nextUser.id, { role: nextUser.role, active: nextUser.active });
+    return db;
+  });
+  if (sendMutationError(response, result)) return;
+  response.json(filterDbForUser(result, request.auth.user));
+});
+
+app.post("/api/admin/media", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
+  const body = request.body || {};
+  const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     db.media = Array.isArray(db.media) ? db.media : [];
     const equipment = db.equipment.find((item) => item.id === body.equipmentId);
     if (!equipment) return mutationError(404, "Equipment not found.");
+    if (!canAccessProject(user, equipment.projectId)) return mutationError(403, "Permission denied.");
     const files = Array.isArray(body.files) ? body.files : [];
     const comments = String(body.comments || "").trim();
     if (!files.length && !comments) return mutationError(400, "Media file or comment is required.");
     appendMediaRecords(db, equipment, { category: body.category, title: body.title, reference: body.reference, comments, files });
+    appendAuditLog(db, user, "media.create", "equipment", equipment.id, { projectId: equipment.projectId, files: files.length, category: body.category });
     return db;
   });
   if (sendMutationError(response, result)) return;
-  response.json(result);
+
+  response.json(filterDbForUser(result, request.auth.user));
 });
 
-app.post("/api/admin/row", async (request, response) => {
+app.post("/api/admin/row", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const body = request.body || {};
   const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     const equipment = db.equipment.find((item) => item.id === body.equipmentId);
     const point = db.points.find((item) => item.id === body.pointId);
     const record = db.records.find((item) => item.id === body.recordId);
     if (!equipment || !point || !record) return mutationError(404, "Row target not found.");
+    if (!canAccessProject(user, equipment.projectId) || !canAccessProject(user, body.projectId || equipment.projectId)) return mutationError(403, "Permission denied.");
 
     equipment.projectId = body.projectId || equipment.projectId;
     equipment.locationId = body.locationId || equipment.locationId;
@@ -365,17 +490,21 @@ app.post("/api/admin/row", async (request, response) => {
     record.updatedAt = new Date().toLocaleString("sv-SE");
     record.serverUpdatedAt = Date.now();
 
+    appendAuditLog(db, user, "row.update", "record", record.id, { projectId: record.projectId, status: record.status });
     return db;
   });
   if (sendMutationError(response, result)) return;
-  response.json(result);
+
+  response.json(filterDbForUser(result, request.auth.user));
 });
 
-app.post("/api/admin/point", async (request, response) => {
+app.post("/api/admin/point", requireAuth(["admin", "manager", "engineer", "field"]), async (request, response) => {
   const body = request.body || {};
   const result = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     const equipment = db.equipment.find((item) => item.id === body.equipmentId);
     if (!equipment) return mutationError(404, "Equipment not found.");
+    if (!canAccessProject(user, equipment.projectId)) return mutationError(403, "Permission denied.");
 
     const point = {
       id: body.id || createId("pt"),
@@ -426,13 +555,15 @@ app.post("/api/admin/point", async (request, response) => {
       };
     }
 
+    appendAuditLog(db, user, pointIndex === -1 ? "point.create" : "point.update", "point", point.id, { projectId: equipment.projectId, equipmentId: equipment.id, status: point.status });
     return db;
   });
   if (sendMutationError(response, result)) return;
-  response.json(result);
+
+  response.json(filterDbForUser(result, request.auth.user));
 });
 
-app.post("/api/import/equipment", asyncRoute(async (request, response) => {
+app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(async (request, response) => {
   const { fileName = "equipment.xlsx", base64 } = request.body;
   if (!base64) {
     response.status(400).json({ error: "Missing base64 Excel payload." });
@@ -453,6 +584,7 @@ app.post("/api/import/equipment", asyncRoute(async (request, response) => {
   const imported = [];
 
   const db = await withDbMutation(async (db) => {
+    const user = getFreshUser(db, request.auth.user);
     for (const row of rows) {
       const name = pick(row, equipmentNameAliases);
       if (!name) continue;
@@ -467,6 +599,7 @@ app.post("/api/import/equipment", asyncRoute(async (request, response) => {
       const due = pick(row, dueAliases) || "";
 
       const project = upsertByName(db.projects, { id: createId("p"), name: projectName, client: "" });
+      if (!canAccessProject(user, project.id)) continue;
       const location = upsertLocation(db.locations, { id: createId("l"), projectId: project.id, name: locationName });
       let item = db.equipment.find((candidate) => candidate.name === name && candidate.locationId === location.id);
       if (!item) {
@@ -521,13 +654,14 @@ app.post("/api/import/equipment", asyncRoute(async (request, response) => {
       imported.push(item);
     }
 
+    appendAuditLog(db, user, "equipment.import", "import", fileName, { importedCount: imported.length });
     return db;
   });
   if (!imported.length) {
     response.status(400).json({ error: "Excel file does not contain any valid equipment rows. Please check the Equipment column or use the exported template." });
     return;
   }
-  response.json({ fileName, importedCount: imported.length, data: db });
+  response.json({ fileName, importedCount: imported.length, data: filterDbForUser(db, request.auth.user) });
 }));
 
 app.use((error, _request, response, _next) => {
@@ -548,11 +682,14 @@ async function readDb() {
   const content = await readFile(dbPath, "utf8");
   const db = JSON.parse(content.replace(/^\uFEFF/, ""));
   db.media = Array.isArray(db.media) ? db.media : [];
+  ensureSecurityData(db);
   return db;
 }
 
 function createEmptyDb() {
-  return { version: 1, projects: [], locations: [], equipment: [], points: [], media: [], records: [] };
+  const db = { version: 1, projects: [], locations: [], equipment: [], points: [], media: [], records: [], users: [], auditLogs: [] };
+  ensureSecurityData(db);
+  return db;
 }
 
 async function writeDb(db) {
@@ -583,6 +720,117 @@ function sendMutationError(response, result) {
   if (!result?.mutationError) return false;
   response.status(result.status || 500).json({ error: result.error || "Database mutation failed." });
   return true;
+}
+
+function ensureSecurityData(db) {
+  db.users = Array.isArray(db.users) ? db.users : [];
+  db.auditLogs = Array.isArray(db.auditLogs) ? db.auditLogs : [];
+  for (const user of defaultUsers) {
+    if (db.users.some((item) => item.username?.toLowerCase() === user.username.toLowerCase())) continue;
+    db.users.push({
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      role: user.role,
+      passwordHash: hashPassword(user.password),
+      active: user.active,
+      projectIds: user.projectIds,
+      createdAt: new Date().toISOString()
+    });
+  }
+}
+
+function hashPassword(password) {
+  return createHash("sha256").update(`elv:${password}`).digest("hex");
+}
+
+function createSession(user) {
+  const token = randomUUID();
+  sessions.set(token, { userId: user.id, createdAt: Date.now(), expiresAt: Date.now() + 1000 * 60 * 60 * 12 });
+  return token;
+}
+
+function getBearerToken(request) {
+  const header = request.headers.authorization || "";
+  return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+}
+
+function getUserFromRequest(request, db) {
+  const token = getBearerToken(request);
+  if (!token) return null;
+  const session = sessions.get(token);
+  if (!session || session.expiresAt < Date.now()) {
+    sessions.delete(token);
+    return null;
+  }
+  return db.users.find((item) => item.id === session.userId && item.active !== false) || null;
+}
+
+function getFreshUser(db, user) {
+  return db.users.find((item) => item.id === user?.id && item.active !== false) || user;
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    active: user.active !== false,
+    projectIds: Array.isArray(user.projectIds) ? user.projectIds : []
+  };
+}
+
+function canAccessProject(user, projectId) {
+  if (!user || user.role === "admin") return true;
+  const projectIds = Array.isArray(user.projectIds) ? user.projectIds : [];
+  return !projectId || projectIds.includes(projectId);
+}
+
+function filterDbForUser(db, user) {
+  if (!user || user.role === "admin") return sanitizeDbForClient(db);
+  const allowedProjects = new Set(Array.isArray(user.projectIds) ? user.projectIds : []);
+  const equipment = db.equipment.filter((item) => allowedProjects.has(item.projectId));
+  const equipmentIds = new Set(equipment.map((item) => item.id));
+  const points = db.points.filter((item) => equipmentIds.has(item.equipmentId));
+  const pointIds = new Set(points.map((item) => item.id));
+  return sanitizeDbForClient({
+    ...db,
+    projects: db.projects.filter((item) => allowedProjects.has(item.id)),
+    locations: db.locations.filter((item) => allowedProjects.has(item.projectId)),
+    equipment,
+    points,
+    records: db.records.filter((item) => allowedProjects.has(item.projectId) && equipmentIds.has(item.equipmentId) && pointIds.has(item.pointId)),
+    media: (db.media || []).filter((item) => allowedProjects.has(item.projectId) && equipmentIds.has(item.equipmentId)),
+    auditLogs: (db.auditLogs || []).filter((item) => allowedProjects.has(item.projectId) || item.userId === user.id)
+  });
+}
+
+function sanitizeDbForClient(db) {
+  return {
+    ...db,
+    users: (db.users || []).map(publicUser),
+    auditLogs: [...(db.auditLogs || [])].slice(-300).reverse()
+  };
+}
+
+function appendAuditLog(db, user, action, targetType, targetId, details = {}, success = true) {
+  db.auditLogs = Array.isArray(db.auditLogs) ? db.auditLogs : [];
+  db.auditLogs.push({
+    id: createId("log"),
+    userId: user?.id || "",
+    userName: user?.name || user?.username || "Guest",
+    role: user?.role || "guest",
+    action,
+    targetType,
+    targetId: targetId || "",
+    projectId: details.projectId || "",
+    success,
+    details,
+    createdAt: new Date().toISOString()
+  });
+  if (db.auditLogs.length > 1000) db.auditLogs = db.auditLogs.slice(-1000);
 }
 
 async function saveAttachment(file) {
