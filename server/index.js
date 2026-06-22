@@ -9,6 +9,18 @@ import ExcelJS from "exceljs";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import { dataStore, isPostgresMode, startupMode } from "./config.js";
+import { checkPostgresReady, disconnectPrisma } from "./prisma.js";
+import {
+  appendPostgresAuditLog,
+  createPostgresSession,
+  deletePostgresSession,
+  findPostgresUserById,
+  findPostgresUserByUsername,
+  getPostgresBootstrapForUser,
+  getPostgresUserByToken,
+  upgradePostgresPasswordHash
+} from "./postgresRepository.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -159,6 +171,22 @@ const asyncRoute = (handler) => async (request, response) => {
 
 const requireAuth = (allowedRoles = roles) => async (request, response, next) => {
   try {
+    if (isPostgresMode) {
+      const token = getBearerToken(request);
+      const user = await getPostgresUserByToken(token);
+      if (!user) {
+        response.status(401).json({ error: "Login required." });
+        return;
+      }
+      if (!allowedRoles.includes(user.role)) {
+        await appendPostgresAuditLog(user, "permission.denied", request.method, request.path, { allowedRoles }, false);
+        response.status(403).json({ error: "Permission denied." });
+        return;
+      }
+      request.auth = { token, user };
+      next();
+      return;
+    }
     const db = await readDb();
     const token = getBearerToken(request);
     const user = getUserFromRequest(request, db);
@@ -180,12 +208,35 @@ const requireAuth = (allowedRoles = roles) => async (request, response, next) =>
 };
 
 app.get("/api/health", (_request, response) => {
-  response.json({ ok: true, time: Date.now() });
+  response.json({ ok: true, time: Date.now(), dataStore });
 });
+
+app.get("/api/ready", asyncRoute(async (_request, response) => {
+  const storage = await checkStorageReady();
+  const database = await checkPostgresReady();
+  const ok = storage.ok && database.ok;
+  response.status(ok ? 200 : 503).json({ ok, time: Date.now(), dataStore, storage, database });
+}));
 
 app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) => {
   const username = String(request.body?.username || "").trim().toLowerCase();
   const password = String(request.body?.password || "");
+  if (isPostgresMode) {
+    const user = await findPostgresUserByUsername(username);
+    if (!user || !(await verifyPassword(password, user))) {
+      await appendPostgresAuditLog(null, "login.failed", "auth", username || "unknown", { username }, false);
+      response.status(401).json({ error: "Invalid username or password." });
+      return;
+    }
+    if (isLegacyPasswordHash(user.passwordHash)) {
+      user.passwordHash = hashPassword(password);
+      await upgradePostgresPasswordHash(user.id, user.passwordHash);
+    }
+    const token = await createPostgresSession(user.id, sessionDurationMs);
+    await appendPostgresAuditLog(user, "login.success", "auth", user.id);
+    response.json({ token, user: publicUser(user), data: await getPostgresBootstrapForUser(user) });
+    return;
+  }
   const db = await readDb();
   const user = db.users.find((item) => item.username.toLowerCase() === username && item.active !== false);
   if (!user || !(await verifyPassword(password, user))) {
@@ -204,6 +255,12 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
 }));
 
 app.post("/api/auth/logout", requireAuth(), asyncRoute(async (request, response) => {
+  if (isPostgresMode) {
+    await deletePostgresSession(request.auth.token);
+    await appendPostgresAuditLog(request.auth.user, "logout", "auth", request.auth.user.id);
+    response.json({ ok: true });
+    return;
+  }
   sessions.delete(request.auth.token);
   const db = await readDb();
   appendAuditLog(db, request.auth.user, "logout", "auth", request.auth.user.id);
@@ -212,14 +269,23 @@ app.post("/api/auth/logout", requireAuth(), asyncRoute(async (request, response)
 }));
 
 app.get("/api/auth/me", requireAuth(), asyncRoute(async (request, response) => {
+  if (isPostgresMode) {
+    const user = await findPostgresUserById(request.auth.user.id);
+    response.json({ user: publicUser(user), data: await getPostgresBootstrapForUser(user) });
+    return;
+  }
   const db = await readDb();
   const user = db.users.find((item) => item.id === request.auth.user.id && item.active !== false);
   response.json({ user: publicUser(user), data: filterDbForUser(db, user) });
 }));
 
-app.get("/api/bootstrap", requireAuth(), async (request, response) => {
+app.get("/api/bootstrap", requireAuth(), asyncRoute(async (request, response) => {
+  if (isPostgresMode) {
+    response.json(await getPostgresBootstrapForUser(request.auth.user));
+    return;
+  }
   response.json(filterDbForUser(await readDb(), request.auth.user));
-});
+}));
 
 app.get("/api/template/equipment", asyncRoute(async (_request, response) => {
   const rows = [
@@ -712,10 +778,18 @@ app.use((error, _request, response, _next) => {
 });
 
 app.listen(port, () => {
-  console.log(`ELV acceptance API listening on http://127.0.0.1:${port}`);
+  console.log(`ELV acceptance API listening on http://127.0.0.1:${port} (${startupMode.dataStore} mode)`);
 });
 
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, async () => {
+    await disconnectPrisma().catch(() => {});
+    process.exit(0);
+  });
+}
+
 async function readDb() {
+  assertJsonDataStore();
   await dbWriteQueue.catch(() => {});
   await mkdir(dataDir, { recursive: true });
   if (!existsSync(dbPath)) {
@@ -736,11 +810,13 @@ function createEmptyDb() {
 }
 
 async function writeDb(db) {
+  assertJsonDataStore();
   dbWriteQueue = dbWriteQueue.catch(() => {}).then(() => writeFile(dbPath, `${JSON.stringify(db, null, 2)}\n`));
   await dbWriteQueue;
 }
 
 async function withDbMutation(handler) {
+  assertJsonDataStore();
   const run = dbMutationQueue
     .catch(() => {})
     .then(async () => {
@@ -763,6 +839,23 @@ function sendMutationError(response, result) {
   if (!result?.mutationError) return false;
   response.status(result.status || 500).json({ error: result.error || "Database mutation failed." });
   return true;
+}
+
+function assertJsonDataStore() {
+  if (!isPostgresMode) return;
+  const error = new Error("PostgreSQL runtime repositories are not enabled for this endpoint yet. Set DATA_STORE=json or complete the repository migration.");
+  error.status = 503;
+  throw error;
+}
+
+async function checkStorageReady() {
+  try {
+    await mkdir(uploadDir, { recursive: true });
+    await readFile(seedDbPath, "utf8").catch(() => "");
+    return { ok: true, uploadDir: path.relative(rootDir, uploadDir) };
+  } catch (error) {
+    return { ok: false, uploadDir: path.relative(rootDir, uploadDir), error: error.message };
+  }
 }
 
 function ensureSecurityData(db) {

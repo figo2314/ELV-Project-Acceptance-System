@@ -28,6 +28,17 @@ npm run db:migrate
 npm run db:seed:json
 ```
 
+## Runtime Mode
+
+The current API defaults to `DATA_STORE=json` so the MVP remains usable while PostgreSQL repositories are migrated route by route.
+
+Use `DATA_STORE=postgres` only after the target endpoint has a Prisma-backed repository. Auth, sessions, `/api/auth/me`, and `/api/bootstrap` now have PostgreSQL read/runtime support. Write-heavy business endpoints still intentionally return `503` in postgres mode instead of silently writing to the JSON file.
+
+Health endpoints:
+
+- `/api/health` confirms the API process is alive and reports the configured data store.
+- `/api/ready` checks storage and PostgreSQL connectivity when `DATA_STORE=postgres`.
+
 ## Design Notes
 
 - Binary files are not stored in PostgreSQL. The database stores file metadata and storage paths only.

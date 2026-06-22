@@ -5,6 +5,8 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 ## P0 - Data Layer And Concurrency
 
 - [x] Add PostgreSQL/Prisma schema, initial migration, local Docker database, and JSON import script.
+- [x] Add data store runtime mode and readiness checks for PostgreSQL migration.
+- [x] Add PostgreSQL auth/session/bootstrap read repositories.
 - [ ] Replace the JSON file database runtime with PostgreSQL repositories.
 - [ ] Add database transactions for sync, import, point edits, media uploads, and user management.
 - [x] Add initial indexes for project, location, equipment, point, record status, assignee, due date, and audit log queries.
@@ -48,7 +50,7 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 ## P1 - Observability And Operations
 
 - [ ] Add structured request logging with request IDs.
-- [ ] Add `/api/ready` readiness checks for database and storage.
+- [x] Add `/api/ready` readiness checks for database and storage.
 - [ ] Add metrics for request latency, failed logins, sync conflicts, upload failures, and import failures.
 - [ ] Add audit log pagination and export.
 - [ ] Add load tests for 100 concurrent users covering login, dashboard, sync, import preview, and upload.
