@@ -164,6 +164,17 @@ button {
   white-space: nowrap;
 }
 
+button.sync-pill {
+  cursor: pointer;
+  font: inherit;
+}
+
+button.sync-pill:hover,
+button.sync-pill:focus-visible {
+  box-shadow: 0 10px 24px rgb(31 51 58 / 12%);
+  transform: translateY(-1px);
+}
+
 .sync-pill i {
   border-radius: 999px;
   box-shadow: 0 0 0 5px rgb(148 163 184 / 16%);

@@ -1,5 +1,17 @@
 import { API_BASE, apiFormPost, apiGet, apiPost, configureApi, createApiError } from "./api.js";
-import { ATTACHMENT_DB_NAME, ATTACHMENT_STORE, MEDIA_UPLOAD_LIMIT_BYTES, SEARCH_DEBOUNCE_MS, clearPersistedState, loadPersistedState, savePersistedState } from "./state.js";
+import {
+  ATTACHMENT_DB_NAME,
+  ATTACHMENT_STORE,
+  MEDIA_UPLOAD_LIMIT_BYTES,
+  SEARCH_DEBOUNCE_MS,
+  clearPersistedState,
+  clearSyncRetryState,
+  createSyncRetryState,
+  getPendingSyncRecords,
+  getSyncQueueCount,
+  loadPersistedState,
+  savePersistedState
+} from "./state.js";
 
 const KNOWN_EQUIPMENT_TYPES = ["DDC Panel", "Temperature Sensor", "Air Handling Unit", "Lighting Panel", "Power Meter", "Controller", "Sensor", "Actuator", "Valve", "Meter", "Equipment"];
 
@@ -382,6 +394,10 @@ function defaultState() {
     mediaCategoryFilter: "all",
     mediaUploadOpen: false,
     mediaUploadEquipmentId: "",
+    syncQueueOpen: false,
+    activeConflictId: "",
+    syncRetryAttempt: 0,
+    syncRetryAt: 0,
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -499,6 +515,8 @@ function render() {
       ${renderIssueModal()}
       ${renderFieldAddPointModal()}
       ${renderMediaUploadModal()}
+      ${renderSyncQueueModal()}
+      ${renderConflictModal()}
       <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
     </main>
   `;
@@ -579,9 +597,14 @@ function renderPasswordChange() {
 }
 
 function renderTopbar() {
-  const pendingSync = state.data.records.filter((record) => record.sync === "pending").length;
+  const pendingSync = getSyncQueueCount(state.data);
   const isOnline = navigator.onLine && state.serverOnline;
-  const syncText = pendingSync ? `${pendingSync} ${t("syncPending")}` : t("synced");
+  const retryWait = getSyncRetryWaitSeconds();
+  const syncText = pendingSync
+    ? (isOnline ? `Syncing (${pendingSync})${retryWait ? ` - retry in ${retryWait}s` : "..."}` : `Offline: ${pendingSync} Pending`)
+    : t("synced");
+  const syncTag = pendingSync ? "button" : "span";
+  const syncAction = pendingSync ? `type="button" data-sync-queue-toggle title="View sync queue"` : "";
   const user = state.currentUser;
   return `
     <header class="topbar">
@@ -591,13 +614,13 @@ function renderTopbar() {
       ${state.view === "admin" && state.authToken ? `<nav class="top-nav">${renderAdminNav()}</nav>` : ""}
       <div class="topbar-actions">
         ${user ? `<span class="user-pill"><strong>${escapeHtml(user.name || user.username)}</strong><small>${escapeHtml(user.role)}</small></span>` : ""}
-        <span class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}">
+        <${syncTag} class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}" ${syncAction}>
           <i></i>
           <span>
             <strong>${isOnline ? t("online") : t("offline")}</strong>
             <small>${syncText}</small>
           </span>
-        </span>
+        </${syncTag}>
         <div class="actions">
           <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
           ${state.authToken ? `<button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>` : ""}
@@ -2408,6 +2431,112 @@ function renderIssueModal() {
   `;
 }
 
+function renderSyncQueueModal() {
+  if (!state.syncQueueOpen) return "";
+  const pending = getPendingSyncRecords(state.data);
+  const retryWait = getSyncRetryWaitSeconds();
+  return `
+    <div class="modal-backdrop">
+      <section class="modal" role="dialog" aria-modal="true" aria-label="Sync queue" data-sync-queue-modal>
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Offline Sync</p>
+            <h2>${pending.length ? `${pending.length} Pending Changes` : "Queue Clear"}</h2>
+          </div>
+          <button class="icon-btn" data-close-sync-queue title="${t("close")}">X</button>
+        </div>
+        <div class="modal-summary">
+          <span class="badge ${navigator.onLine && state.serverOnline ? "passed" : "pending"}">${navigator.onLine && state.serverOnline ? t("online") : t("offline")}</span>
+          <strong>${pending.length ? "Waiting to upload" : t("synced")}</strong>
+          <span>${retryWait ? `Retry scheduled in ${retryWait}s` : "Ready"}</span>
+        </div>
+        <div class="modal-block">
+          <div class="section-title">Pending Sync Queue</div>
+          ${
+            pending.length
+              ? `<div class="issue-list">${pending.map(renderSyncQueueItem).join("")}</div>`
+              : `<div class="empty small">${t("synced")}</div>`
+          }
+        </div>
+        <div class="modal-actions">
+          <button class="ghost" data-close-sync-queue>${t("close")}</button>
+          <button class="primary" data-retry-sync ${pending.length ? "" : "disabled"}>Retry Now</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderSyncQueueItem(record) {
+  const equipment = state.data.equipment.find((item) => item.id === record.equipmentId);
+  const point = state.data.points.find((item) => item.id === record.pointId);
+  const location = state.data.locations.find((item) => item.id === record.locationId);
+  const hasConflict = state.conflicts.some((item) => item.local?.id === record.id);
+  return `
+    <article class="issue-card ${record.status || "pending"}" data-sync-record="${record.id}">
+      <div>
+        <span class="badge ${hasConflict ? "failed" : record.status || "pending"}">${hasConflict ? "Conflict" : statusLabel(record.status)}</span>
+        <h3>${escapeHtml(point?.name || record.title || record.id)}</h3>
+        <p>${escapeHtml(equipment?.name || "-")} / ${escapeHtml(location?.name || "-")}</p>
+      </div>
+      <div class="issue-card-meta">
+        <span>${t("lastUpdated")}: <strong>${escapeHtml(record.updatedAt || formatDateTime(record.localUpdatedAt) || "-")}</strong></span>
+        <span>${t("comments")}: <strong>${escapeHtml(record.comments || "-")}</strong></span>
+      </div>
+    </article>
+  `;
+}
+
+function renderConflictModal() {
+  const conflict = getActiveConflict();
+  if (!conflict) return "";
+  return showConflictModal(conflict.local, conflict.server, conflict);
+}
+
+function showConflictModal(localData, serverData, conflict = {}) {
+  const point = state.data.points.find((item) => item.id === localData?.pointId) || state.data.points.find((item) => item.id === serverData?.pointId);
+  const equipment = state.data.equipment.find((item) => item.id === localData?.equipmentId) || state.data.equipment.find((item) => item.id === serverData?.equipmentId);
+  const title = point?.name || localData?.title || serverData?.title || "Sync conflict";
+  return `
+    <div class="modal-backdrop">
+      <section class="modal" role="dialog" aria-modal="true" aria-label="Resolve sync conflict" data-conflict-modal>
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Conflict Resolution</p>
+            <h2>${escapeHtml(title)}</h2>
+          </div>
+          <button class="icon-btn" data-close-conflict title="${t("close")}">X</button>
+        </div>
+        <div class="modal-summary">
+          <span class="badge failed">409</span>
+          <strong>${escapeHtml(equipment?.name || "-")}</strong>
+          <span>${escapeHtml(conflict.error || "Server data changed before your offline update was synced.")}</span>
+        </div>
+        <div class="modal-grid">
+          ${renderConflictChoice("local", "Use My Local Changes", localData)}
+          ${renderConflictChoice("server", "Keep Server Data", serverData)}
+        </div>
+        <div class="modal-actions">
+          <button class="ghost" data-close-conflict>${t("close")}</button>
+          <button class="primary" data-resolve-conflict="local">Use My Local Changes</button>
+          <button class="ghost" data-resolve-conflict="server">Keep Server Data</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderConflictChoice(kind, label, record) {
+  return `
+    <div class="modal-detail">
+      <span>${label}</span>
+      <strong>${escapeHtml(statusLabel(record?.status || "pending"))}</strong>
+      <small>${escapeHtml(record?.comments || record?.title || "-")}</small>
+      <small>${t("lastUpdated")}: ${escapeHtml(record?.updatedAt || formatDateTime(record?.serverUpdatedAt || record?.localUpdatedAt) || "-")}</small>
+    </div>
+  `;
+}
+
 function modalDetail(label, value) {
   return `<div class="modal-detail"><span>${label}</span><strong>${escapeHtml(value || "-")}</strong></div>`;
 }
@@ -2755,6 +2884,8 @@ function bindIssueDetailEvents() {
   document.querySelector("[data-modal]")?.addEventListener("click", stopModalClick);
   document.querySelector("[data-field-add-point-modal]")?.addEventListener("click", stopModalClick);
   document.querySelector("[data-media-upload-modal]")?.addEventListener("click", stopModalClick);
+  document.querySelector("[data-sync-queue-modal]")?.addEventListener("click", stopModalClick);
+  document.querySelector("[data-conflict-modal]")?.addEventListener("click", stopModalClick);
   document.querySelectorAll("[data-close-media-upload]").forEach((button) => {
     button.addEventListener("click", closeMediaUploadModal);
   });
@@ -2772,6 +2903,20 @@ function bindEvents() {
   });
   document.querySelector("[data-password-change-form]")?.addEventListener("submit", changePassword);
   document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
+  document.querySelector("[data-sync-queue-toggle]")?.addEventListener("click", () => setState({ syncQueueOpen: true }));
+  document.querySelectorAll("[data-close-sync-queue]").forEach((button) => {
+    button.addEventListener("click", () => setState({ syncQueueOpen: false }));
+  });
+  document.querySelector("[data-retry-sync]")?.addEventListener("click", () => syncRecords(true, { force: true }));
+  document.querySelectorAll("[data-sync-record]").forEach((item) => {
+    item.addEventListener("click", () => openConflictForRecord(item.dataset.syncRecord));
+  });
+  document.querySelectorAll("[data-close-conflict]").forEach((button) => {
+    button.addEventListener("click", closeConflictModal);
+  });
+  document.querySelectorAll("[data-resolve-conflict]").forEach((button) => {
+    button.addEventListener("click", () => resolveActiveConflict(button.dataset.resolveConflict));
+  });
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
@@ -3282,11 +3427,17 @@ function updateRecord(recordId, patch) {
   return true;
 }
 
-async function syncRecords(showToast) {
+async function syncRecords(showToast, options = {}) {
   if (!state.authToken) return;
   const pending = getPendingRecords();
   if (!pending.length) {
     if (showToast) flash(t("synced"));
+    setState({ ...clearSyncRetryState(), syncQueueOpen: false }, false);
+    return;
+  }
+  if (!options.force && state.syncRetryAt && Date.now() < state.syncRetryAt) {
+    if (showToast) flash(`Retry in ${getSyncRetryWaitSeconds()}s`);
+    scheduleSyncRetry();
     return;
   }
   try {
@@ -3298,10 +3449,18 @@ async function syncRecords(showToast) {
     const response = await apiPost("/sync", { records: uploadResult.records });
     const { conflicts = [], ...serverData } = response;
     const data = mergeLocalPendingRecords(serverData, uploadResult.records, conflicts);
-    setState({ data: normalizeSelection(data), conflicts, serverOnline: true });
+    setState({ data: normalizeSelection(data), conflicts, serverOnline: true, activeConflictId: conflicts[0]?.local?.id || "", ...clearSyncRetryState() });
     if (showToast) flash(conflicts.length ? t("syncConflicts") : t("synced"));
   } catch (error) {
-    setState({ serverOnline: false });
+    const conflicts = extractConflictsFromError(error, pending);
+    if (conflicts.length) {
+      const data = mergeLocalPendingRecords(state.data, pending, conflicts);
+      setState({ data: normalizeSelection(data), conflicts, activeConflictId: conflicts[0]?.local?.id || "", serverOnline: true, ...clearSyncRetryState() });
+      if (showToast) flash(t("syncConflicts"));
+      return;
+    }
+    setState({ serverOnline: false, ...createSyncRetryState(state.syncRetryAttempt) });
+    scheduleSyncRetry();
     if (showToast) flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
   }
 }
@@ -3331,6 +3490,94 @@ function mergeLocalPendingRecords(serverData, pendingRecords, conflicts = []) {
     }
   }
   return refreshLocalStatuses({ ...serverData, records });
+}
+
+function extractConflictsFromError(error, pendingRecords) {
+  if (error?.status !== 409) return [];
+  const body = error.body || {};
+  const conflicts = body.conflicts || body.preview?.conflicts || [];
+  if (Array.isArray(conflicts) && conflicts.length) return conflicts;
+  const local = body.local || pendingRecords[0];
+  return local ? [{ local, server: body.server || null, error: error.detail || error.message }] : [];
+}
+
+function scheduleSyncRetry() {
+  if (!state.authToken || !getPendingRecords().length || !state.syncRetryAt) return;
+  const delay = Math.max(0, state.syncRetryAt - Date.now());
+  window.setTimeout(() => {
+    if (!state.authToken || !getPendingRecords().length) return;
+    syncRecords(false, { force: true });
+  }, delay);
+}
+
+function getSyncRetryWaitSeconds() {
+  if (!state.syncRetryAt) return 0;
+  return Math.max(0, Math.ceil((state.syncRetryAt - Date.now()) / 1000));
+}
+
+function getActiveConflict() {
+  if (!state.conflicts.length) return null;
+  return state.conflicts.find((item) => item.local?.id === state.activeConflictId) || state.conflicts[0];
+}
+
+function openConflictForRecord(recordId) {
+  const conflict = state.conflicts.find((item) => item.local?.id === recordId);
+  if (conflict) {
+    setState({ activeConflictId: conflict.local?.id || "", syncQueueOpen: false });
+    return;
+  }
+  setState({ selectedRecordId: recordId, syncQueueOpen: false });
+}
+
+function closeConflictModal() {
+  setState({ activeConflictId: "" });
+}
+
+async function resolveActiveConflict(strategy) {
+  const conflict = getActiveConflict();
+  if (!conflict?.local?.id) return;
+  if (strategy === "server") {
+    keepServerConflictData(conflict);
+    return;
+  }
+  await useLocalConflictData(conflict);
+}
+
+function keepServerConflictData(conflict) {
+  const records = state.data.records.map((record) => {
+    if (record.id !== conflict.local.id) return record;
+    return conflict.server ? { ...conflict.server, sync: "synced", hasConflict: false } : { ...record, sync: "synced", hasConflict: false };
+  });
+  const conflicts = state.conflicts.filter((item) => item.local?.id !== conflict.local.id);
+  setState({
+    data: normalizeSelection(refreshLocalStatuses({ ...state.data, records })),
+    conflicts,
+    activeConflictId: conflicts[0]?.local?.id || "",
+    syncQueueOpen: Boolean(conflicts.length)
+  });
+  flash("Server data kept");
+}
+
+async function useLocalConflictData(conflict) {
+  const records = state.data.records.map((record) => {
+    if (record.id !== conflict.local.id) return record;
+    return {
+      ...record,
+      ...conflict.local,
+      sync: "pending",
+      hasConflict: false,
+      baseServerUpdatedAt: conflict.server?.serverUpdatedAt || record.serverUpdatedAt || conflict.local.baseServerUpdatedAt || Date.now()
+    };
+  });
+  const conflicts = state.conflicts.filter((item) => item.local?.id !== conflict.local.id);
+  setState({
+    data: refreshLocalStatuses({ ...state.data, records }),
+    conflicts,
+    activeConflictId: conflicts[0]?.local?.id || "",
+    syncQueueOpen: Boolean(conflicts.length),
+    ...clearSyncRetryState()
+  });
+  await syncRecords(true, { force: true });
 }
 
 async function validateExcelFile(file) {

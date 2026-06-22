@@ -44,11 +44,12 @@ export async function apiFormPost(path, formData) {
 
 export async function createApiError(response, path) {
   let detail = "";
+  let body = null;
   try {
     const text = await response.text();
     if (text) {
       try {
-        const body = JSON.parse(text);
+        body = JSON.parse(text);
         detail = body.error || body.message || text;
       } catch {
         detail = text;
@@ -61,6 +62,7 @@ export async function createApiError(response, path) {
   error.status = response.status;
   error.path = path;
   error.detail = detail;
+  error.body = body;
   if (response.status === 401 && onUnauthorized) onUnauthorized();
   return error;
 }
