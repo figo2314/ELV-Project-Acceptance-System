@@ -3,6 +3,7 @@ const ATTACHMENT_DB_NAME = "elv-acceptance-attachments";
 const ATTACHMENT_STORE = "attachments";
 const MEDIA_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 const AUTH_TOKEN_KEY = "elv-acceptance-auth-token";
+const SEARCH_DEBOUNCE_MS = 1100;
 const API_BASE =
   window.__ELV_API_BASE__ ||
   import.meta.env?.VITE_API_BASE ||
@@ -331,7 +332,7 @@ const fallbackData = {
 };
 
 let state = loadState();
-let adminSearchTimer = null;
+const debounceTimers = new Map();
 let pendingMediaUploadFiles = [];
 let pendingMediaUploadDraft = {};
 let mediaUploadSaving = false;
@@ -381,6 +382,7 @@ function defaultState() {
     mediaFloor: "",
     mediaRoom: "",
     mediaSearch: "",
+    mediaSearchDraft: "",
     mediaCategoryFilter: "all",
     mediaUploadOpen: false,
     mediaUploadEquipmentId: "",
@@ -1448,6 +1450,7 @@ function renderMediaEquipmentButton(equipment, activeId) {
 function renderMediaFilters() {
   const projects = state.data.projects;
   const projectId = state.mediaProjectId || "";
+  const mediaSearchValue = state.mediaSearchDraft ?? state.mediaSearch ?? "";
   const equipment = state.data.equipment.filter((item) => !projectId || item.projectId === projectId);
   const locationParts = equipment.map((item) => parseLocationParts(getLocationName(item.locationId)));
   const buildings = uniqueSorted(locationParts.map((item) => item.building));
@@ -1485,7 +1488,7 @@ function renderMediaFilters() {
         </select>
       </label>
       <label>${t("search")}
-        <input data-media-filter="mediaSearch" value="${escapeHtml(state.mediaSearch || "")}" placeholder="Search equipment, type, location, media comments" />
+        <input data-media-filter="mediaSearch" value="${escapeHtml(mediaSearchValue)}" placeholder="Search equipment, type, location, media comments" />
       </label>
     </div>
   `;
@@ -2496,6 +2499,23 @@ function updateMediaFilter(key, value) {
   setState(patch);
 }
 
+function updateMediaSearch(value) {
+  setState({ mediaSearch: value, mediaSearchDraft: value });
+}
+
+function updateDebouncedSearch(key, value, draftPatch, commit) {
+  state = { ...state, ...draftPatch };
+  saveState();
+  window.clearTimeout(debounceTimers.get(key));
+  debounceTimers.set(
+    key,
+    window.setTimeout(() => {
+      debounceTimers.delete(key);
+      commit(value);
+    }, SEARCH_DEBOUNCE_MS)
+  );
+}
+
 function bindMediaDropZone(zone) {
   zone.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -2595,7 +2615,11 @@ function bindEvents() {
     button.addEventListener("click", () => setState({ mediaEquipmentId: button.dataset.mediaEquipment }));
   });
   document.querySelectorAll("[data-media-filter]").forEach((field) => {
-    field.addEventListener(field.tagName === "INPUT" ? "input" : "change", () => updateMediaFilter(field.dataset.mediaFilter, field.value));
+    if (field.tagName === "INPUT") {
+      field.addEventListener("input", () => updateDebouncedSearch("mediaSearch", field.value, { mediaSearchDraft: field.value }, (value) => updateMediaSearch(value)));
+    } else {
+      field.addEventListener("change", () => updateMediaFilter(field.dataset.mediaFilter, field.value));
+    }
   });
   document.querySelectorAll("[data-media-category]").forEach((button) => {
     button.addEventListener("click", () => setState({ mediaCategoryFilter: button.dataset.mediaCategory || "all" }));
@@ -2930,12 +2954,9 @@ function updateAdminFilter(field) {
 }
 
 function updateAdminSearch(value) {
-  state = { ...state, adminSearchDraft: value };
-  saveState();
-  window.clearTimeout(adminSearchTimer);
-  adminSearchTimer = window.setTimeout(() => {
-    setState({ adminSearch: value, adminSearchDraft: value });
-  }, 350);
+  updateDebouncedSearch("adminSearch", value, { adminSearchDraft: value }, (nextValue) => {
+    setState({ adminSearch: nextValue, adminSearchDraft: nextValue });
+  });
 }
 
 function bindStatusPickers() {
