@@ -37,6 +37,57 @@ export async function createPostgresSession(userId, durationMs) {
   return token;
 }
 
+export async function resetPostgresLoginFailures(userId) {
+  await getPrisma().user.update({
+    where: { id: userId },
+    data: {
+      failedLoginCount: 0,
+      lockedUntil: null
+    }
+  });
+}
+
+export async function registerPostgresFailedLogin(user, lockThreshold, lockDurationMs) {
+  if (!user?.id) return null;
+  const failedLoginCount = Number(user.failedLoginCount || 0) + 1;
+  const lockedUntil = failedLoginCount >= lockThreshold ? new Date(Date.now() + lockDurationMs) : null;
+  const updated = await getPrisma().user.update({
+    where: { id: user.id },
+    data: { failedLoginCount, lockedUntil },
+    include: { projectAccess: true }
+  });
+  return toClientUser(updated);
+}
+
+export async function updatePostgresPassword(user, passwordHash, options = {}) {
+  const updated = await getPrisma().user.update({
+    where: { id: user.id },
+    data: {
+      passwordHash,
+      mustChangePassword: options.mustChangePassword === true,
+      failedLoginCount: 0,
+      lockedUntil: null,
+      passwordChangedAt: new Date()
+    },
+    include: { projectAccess: true }
+  });
+  await appendPostgresAuditLog(updated, "password.change", "user", updated.id);
+  return toClientUser(updated);
+}
+
+export async function unlockPostgresUser(adminUser, userId) {
+  const user = await getPrisma().user.update({
+    where: { id: userId },
+    data: {
+      failedLoginCount: 0,
+      lockedUntil: null
+    },
+    include: { projectAccess: true }
+  });
+  await appendPostgresAuditLog(adminUser, "user.unlock", "user", user.id);
+  return toClientUser(user);
+}
+
 export async function deletePostgresSession(token) {
   if (!token) return;
   await getPrisma().session.deleteMany({ where: { token } });
@@ -153,7 +204,8 @@ export async function upsertPostgresUser(adminUser, body) {
     const userId = existing?.id || createImportedId("u");
     const passwordHash = body.password
       ? bcrypt.hashSync(String(body.password), bcryptRounds)
-      : existing?.passwordHash || bcrypt.hashSync("changeme123", bcryptRounds);
+      : existing?.passwordHash || bcrypt.hashSync(createTemporaryPassword(), bcryptRounds);
+    const mustChangePassword = body.mustChangePassword === true || body.mustChangePassword === "true" || Boolean(body.password) || !existing;
     await tx.user.upsert({
       where: { id: userId },
       create: {
@@ -162,14 +214,20 @@ export async function upsertPostgresUser(adminUser, body) {
         name,
         role,
         active: body.active === false || body.active === "false" ? false : true,
-        passwordHash
+        passwordHash,
+        mustChangePassword,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        passwordChangedAt: body.password ? new Date() : null
       },
       update: {
         username,
         name,
         role,
         active: body.active === false || body.active === "false" ? false : true,
-        passwordHash
+        passwordHash,
+        mustChangePassword,
+        ...(body.password ? { failedLoginCount: 0, lockedUntil: null, passwordChangedAt: new Date() } : {})
       }
     });
     await tx.userProjectAccess.deleteMany({ where: { userId } });
@@ -479,6 +537,10 @@ function toClientUser(user) {
     role: user.role,
     active: user.active !== false,
     passwordHash: user.passwordHash,
+    mustChangePassword: user.mustChangePassword === true,
+    failedLoginCount: Number(user.failedLoginCount || 0),
+    lockedUntil: user.lockedUntil?.toISOString?.() || user.lockedUntil || "",
+    passwordChangedAt: user.passwordChangedAt?.toISOString?.() || user.passwordChangedAt || "",
     projectIds: Array.isArray(user.projectAccess) ? user.projectAccess.map((item) => item.projectId) : []
   };
 }
@@ -881,4 +943,8 @@ function parseDateTime(value) {
 
 function createImportedId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createTemporaryPassword() {
+  return `Change-${randomUUID().replace(/-/g, "").slice(0, 18)}`;
 }

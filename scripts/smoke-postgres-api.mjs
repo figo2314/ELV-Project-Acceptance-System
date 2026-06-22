@@ -6,13 +6,22 @@ async function main() {
   assert(ready.dataStore === "postgres", `Expected postgres mode, got ${ready.dataStore}.`);
   assert(ready.database?.connected === true, "PostgreSQL is not connected.");
 
+  const adminPassword = `SmokeAdmin-${Date.now()}`;
   const login = await apiPost("/auth/login", { username: "admin", password: "admin123" });
   assert(login.token, "Login did not return a token.");
   assert(login.user?.role === "admin", "Admin login did not return admin role.");
   assert(login.data?.projects?.length, "Bootstrap data has no projects.");
 
   const token = login.token;
-  const data = login.data;
+  let data = login.data;
+  if (login.user?.mustChangePassword) {
+    const changed = await apiPost("/auth/change-password", {
+      currentPassword: "admin123",
+      newPassword: adminPassword
+    }, token);
+    assert(changed.user?.mustChangePassword === false, "Password change did not clear the required flag.");
+    data = changed.data;
+  }
   const equipment = data.equipment[0];
   assert(equipment?.id, "No equipment available for smoke test.");
 
@@ -76,6 +85,29 @@ async function main() {
     token: managerLogin.token,
     expectedStatus: 403
   });
+
+  const lockUserName = `lock-${Date.now()}`;
+  const lockPassword = `Temp-${Date.now()}-pass`;
+  const afterUser = await apiPost("/admin/user", {
+    username: lockUserName,
+    name: "Smoke Lock User",
+    role: "field",
+    active: true,
+    projectIds: [equipment.projectId],
+    password: lockPassword
+  }, token);
+  const lockUser = afterUser.users.find((user) => user.username === lockUserName);
+  assert(lockUser?.mustChangePassword === true, "New users should require a password change.");
+  for (let index = 0; index < 5; index += 1) {
+    await apiFetch("/auth/login", {
+      method: "POST",
+      body: { username: lockUserName, password: "wrong-password" },
+      expectedStatus: index === 4 ? 423 : 401
+    });
+  }
+  const unlocked = await apiPost("/admin/user/unlock", { id: lockUser.id }, token);
+  const unlockedUser = unlocked.users.find((user) => user.id === lockUser.id);
+  assert(!unlockedUser.lockedUntil, "Admin unlock did not clear lockedUntil.");
 
   const metrics = await apiGet("/metrics", token);
   assert(metrics.requestsTotal >= 1, "Metrics did not record requests.");

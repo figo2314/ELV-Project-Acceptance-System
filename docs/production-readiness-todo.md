@@ -22,10 +22,10 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 - [x] Add login and API rate limiting.
 - [x] Replace new password hashes with bcrypt while keeping legacy SHA-256 login compatibility.
 - [x] Replace wildcard CORS with an environment-based allowlist.
-- [ ] Remove demo/default passwords from production startup.
-- [ ] Add a forced first-password-change flow for seeded users.
-- [ ] Move sessions from process memory to Redis or database-backed sessions.
-- [ ] Add account lockout and admin unlock tools for repeated failed logins.
+- [x] Remove demo/default passwords from production startup.
+- [x] Add a forced first-password-change flow for seeded users.
+- [x] Move sessions from process memory to Redis or database-backed sessions.
+- [x] Add account lockout and admin unlock tools for repeated failed logins.
 - [ ] Move browser auth storage from `localStorage` to a safer production token/session strategy.
 - [ ] Add role and permission tests for every admin and field endpoint.
 

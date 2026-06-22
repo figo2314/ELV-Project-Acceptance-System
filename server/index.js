@@ -21,7 +21,11 @@ import {
   getPostgresBootstrapForUser,
   getPostgresUserByToken,
   importPostgresEquipmentRows,
+  registerPostgresFailedLogin,
+  resetPostgresLoginFailures,
   syncPostgresRecords,
+  unlockPostgresUser,
+  updatePostgresPassword,
   updatePostgresProject,
   updatePostgresRow,
   upsertPostgresEquipment,
@@ -43,6 +47,9 @@ const maxUploadFileBytes = 50 * 1024 * 1024;
 const maxUploadTotalBytes = 100 * 1024 * 1024;
 const sessionDurationMs = 1000 * 60 * 60 * 12;
 const bcryptRounds = Number(process.env.BCRYPT_ROUNDS || 12);
+const loginLockThreshold = Number(process.env.LOGIN_LOCK_THRESHOLD || 5);
+const loginLockDurationMs = Number(process.env.LOGIN_LOCK_DURATION_MINUTES || 15) * 60 * 1000;
+const allowDemoUsers = String(process.env.ALLOW_DEMO_USERS || (process.env.NODE_ENV === "production" ? "false" : "true")).toLowerCase() === "true";
 const allowedOrigins = String(
   process.env.CORS_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
 )
@@ -65,7 +72,6 @@ const metrics = {
 };
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
-const sessions = new Map();
 const roles = ["admin", "manager", "engineer", "field"];
 const defaultUsers = [
   { id: "u-admin", username: "admin", name: "System Admin", role: "admin", password: "admin123", active: true, projectIds: [] },
@@ -304,6 +310,10 @@ const requireAuth = (allowedRoles = roles) => async (request, response, next) =>
         return;
       }
       request.auth = { token, user };
+      if (user.mustChangePassword && !["/api/auth/me", "/api/auth/logout", "/api/auth/change-password"].includes(request.path)) {
+        response.status(403).json({ error: "Password change required.", code: "PASSWORD_CHANGE_REQUIRED" });
+        return;
+      }
       next();
       return;
     }
@@ -321,6 +331,10 @@ const requireAuth = (allowedRoles = roles) => async (request, response, next) =>
       return;
     }
     request.auth = { token, user };
+    if (user.mustChangePassword && !["/api/auth/me", "/api/auth/logout", "/api/auth/change-password"].includes(request.path)) {
+      response.status(403).json({ error: "Password change required.", code: "PASSWORD_CHANGE_REQUIRED" });
+      return;
+    }
     next();
   } catch (error) {
     sendApiError(response, error, request);
@@ -347,9 +361,18 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
   const password = String(request.body?.password || "");
   if (isPostgresMode) {
     const user = await findPostgresUserByUsername(username);
+    if (isUserLocked(user)) {
+      response.status(423).json({ error: `Account locked. Try again in ${lockRemainingSeconds(user)} seconds.` });
+      return;
+    }
     if (!user || !(await verifyPassword(password, user))) {
       metrics.failedLogins += 1;
-      await appendPostgresAuditLog(null, "login.failed", "auth", username || "unknown", { username }, false);
+      const updatedUser = await registerPostgresFailedLogin(user, loginLockThreshold, loginLockDurationMs);
+      await appendPostgresAuditLog(updatedUser, "login.failed", "auth", username || "unknown", { username, failedLoginCount: updatedUser?.failedLoginCount || 0 }, false);
+      if (isUserLocked(updatedUser)) {
+        response.status(423).json({ error: `Account locked. Try again in ${lockRemainingSeconds(updatedUser)} seconds.` });
+        return;
+      }
       response.status(401).json({ error: "Invalid username or password." });
       return;
     }
@@ -357,6 +380,7 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
       user.passwordHash = hashPassword(password);
       await upgradePostgresPasswordHash(user.id, user.passwordHash);
     }
+    await resetPostgresLoginFailures(user.id);
     const token = await createPostgresSession(user.id, sessionDurationMs);
     await appendPostgresAuditLog(user, "login.success", "auth", user.id);
     response.json({ token, user: publicUser(user), data: await getPostgresBootstrapForUser(user) });
@@ -364,17 +388,27 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
   }
   const db = await readDb();
   const user = db.users.find((item) => item.username.toLowerCase() === username && item.active !== false);
+  if (isUserLocked(user)) {
+    response.status(423).json({ error: `Account locked. Try again in ${lockRemainingSeconds(user)} seconds.` });
+    return;
+  }
   if (!user || !(await verifyPassword(password, user))) {
     metrics.failedLogins += 1;
-    appendAuditLog(db, null, "login.failed", "auth", username || "unknown", { username }, false);
+    const updatedUser = registerJsonFailedLogin(db, user);
+    appendAuditLog(db, updatedUser, "login.failed", "auth", username || "unknown", { username, failedLoginCount: updatedUser?.failedLoginCount || 0 }, false);
     await writeDb(db);
+    if (isUserLocked(updatedUser)) {
+      response.status(423).json({ error: `Account locked. Try again in ${lockRemainingSeconds(updatedUser)} seconds.` });
+      return;
+    }
     response.status(401).json({ error: "Invalid username or password." });
     return;
   }
   if (isLegacyPasswordHash(user.passwordHash)) {
     user.passwordHash = hashPassword(password);
   }
-  const token = createSession(user);
+  resetJsonLoginFailures(user);
+  const token = createSession(db, user);
   appendAuditLog(db, user, "login.success", "auth", user.id);
   await writeDb(db);
   response.json({ token, user: publicUser(user), data: filterDbForUser(db, user) });
@@ -387,11 +421,48 @@ app.post("/api/auth/logout", requireAuth(), asyncRoute(async (request, response)
     response.json({ ok: true });
     return;
   }
-  sessions.delete(request.auth.token);
   const db = await readDb();
+  db.sessions = (db.sessions || []).filter((session) => session.token !== request.auth.token);
   appendAuditLog(db, request.auth.user, "logout", "auth", request.auth.user.id);
   await writeDb(db);
   response.json({ ok: true });
+}));
+
+app.post("/api/auth/change-password", requireAuth(), asyncRoute(async (request, response) => {
+  const currentPassword = String(request.body?.currentPassword || "");
+  const nextPassword = String(request.body?.newPassword || "");
+  const validationError = validatePasswordChangePayload(currentPassword, nextPassword);
+  if (validationError) {
+    response.status(400).json({ error: validationError });
+    return;
+  }
+
+  if (isPostgresMode) {
+    const user = await findPostgresUserById(request.auth.user.id);
+    if (!user || !(await verifyPassword(currentPassword, user))) {
+      metrics.failedLogins += 1;
+      response.status(401).json({ error: "Current password is incorrect." });
+      return;
+    }
+    const updatedUser = await updatePostgresPassword(user, hashPassword(nextPassword));
+    response.json({ user: publicUser(updatedUser), data: await getPostgresBootstrapForUser(updatedUser) });
+    return;
+  }
+
+  const db = await readDb();
+  const user = db.users.find((item) => item.id === request.auth.user.id && item.active !== false);
+  if (!user || !(await verifyPassword(currentPassword, user))) {
+    metrics.failedLogins += 1;
+    response.status(401).json({ error: "Current password is incorrect." });
+    return;
+  }
+  user.passwordHash = hashPassword(nextPassword);
+  user.mustChangePassword = false;
+  user.passwordChangedAt = new Date().toISOString();
+  resetJsonLoginFailures(user);
+  appendAuditLog(db, user, "password.change", "user", user.id);
+  await writeDb(db);
+  response.json({ user: publicUser(user), data: filterDbForUser(db, user) });
 }));
 
 app.get("/api/auth/me", requireAuth(), asyncRoute(async (request, response) => {
@@ -706,9 +777,18 @@ app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) =>
       active: body.active === false || body.active === "false" ? false : true,
       projectIds: role === "admin" ? [] : projectIds,
       createdAt: existingIndex === -1 ? new Date().toISOString() : db.users[existingIndex].createdAt,
-      passwordHash: db.users[existingIndex]?.passwordHash || hashPassword(body.password || "changeme123")
+      passwordHash: db.users[existingIndex]?.passwordHash || hashPassword(body.password || createTemporaryPassword()),
+      mustChangePassword: body.mustChangePassword === true || body.mustChangePassword === "true" || Boolean(body.password) || existingIndex === -1,
+      failedLoginCount: Number(db.users[existingIndex]?.failedLoginCount || 0),
+      lockedUntil: db.users[existingIndex]?.lockedUntil || "",
+      passwordChangedAt: db.users[existingIndex]?.passwordChangedAt || ""
     };
-    if (body.password) nextUser.passwordHash = hashPassword(String(body.password));
+    if (body.password) {
+      nextUser.passwordHash = hashPassword(String(body.password));
+      nextUser.failedLoginCount = 0;
+      nextUser.lockedUntil = "";
+      nextUser.passwordChangedAt = new Date().toISOString();
+    }
     if (existingIndex === -1) {
       db.users.push(nextUser);
     } else {
@@ -720,6 +800,32 @@ app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) =>
   if (sendMutationError(response, result)) return;
   response.json(filterDbForUser(result, request.auth.user));
 });
+
+app.post("/api/admin/user/unlock", requireAuth(["admin"]), asyncRoute(async (request, response) => {
+  const userId = String(request.body?.id || "").trim();
+  if (!userId) {
+    response.status(400).json({ error: "User id is required." });
+    return;
+  }
+
+  if (isPostgresMode) {
+    await unlockPostgresUser(request.auth.user, userId);
+    response.json(await getPostgresBootstrapForUser(request.auth.user));
+    return;
+  }
+
+  const db = await withDbMutation(async (db) => {
+    const admin = getFreshUser(db, request.auth.user);
+    const user = db.users.find((item) => item.id === userId);
+    if (!user) return mutationError(404, "User not found.");
+    user.failedLoginCount = 0;
+    user.lockedUntil = "";
+    appendAuditLog(db, admin, "user.unlock", "user", user.id);
+    return db;
+  });
+  if (sendMutationError(response, db)) return;
+  response.json(filterDbForUser(db, request.auth.user));
+}));
 
 app.post("/api/admin/media", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const body = request.body || {};
@@ -1074,6 +1180,16 @@ async function checkStorageReady() {
 function ensureSecurityData(db) {
   db.users = Array.isArray(db.users) ? db.users : [];
   db.auditLogs = Array.isArray(db.auditLogs) ? db.auditLogs : [];
+  db.sessions = Array.isArray(db.sessions) ? db.sessions : [];
+  db.sessions = db.sessions.filter((session) => Number(session.expiresAt || 0) > Date.now());
+  if (!allowDemoUsers && !db.users.length) {
+    throw new Error("Production startup requires seeded users. Set ALLOW_DEMO_USERS=true only for local development.");
+  }
+  for (const user of db.users) normalizeSecurityUser(user);
+  if (!allowDemoUsers && db.users.some(isDefaultDemoUser)) {
+    throw new Error("Production startup blocked because demo users are present. Rename or replace seeded accounts before deployment.");
+  }
+  if (!allowDemoUsers) return;
   for (const user of defaultUsers) {
     if (db.users.some((item) => item.username?.toLowerCase() === user.username.toLowerCase())) continue;
     db.users.push({
@@ -1084,9 +1200,25 @@ function ensureSecurityData(db) {
       passwordHash: hashPassword(user.password),
       active: user.active,
       projectIds: user.projectIds,
+      mustChangePassword: true,
+      failedLoginCount: 0,
+      lockedUntil: "",
+      passwordChangedAt: "",
       createdAt: new Date().toISOString()
     });
   }
+}
+
+function normalizeSecurityUser(user) {
+  const hasMustChangeFlag = Object.prototype.hasOwnProperty.call(user, "mustChangePassword");
+  user.mustChangePassword = hasMustChangeFlag ? user.mustChangePassword === true : isDefaultDemoUser(user);
+  user.failedLoginCount = Number(user.failedLoginCount || 0);
+  user.lockedUntil = user.lockedUntil || "";
+  user.passwordChangedAt = user.passwordChangedAt || "";
+}
+
+function isDefaultDemoUser(user) {
+  return defaultUsers.some((item) => item.id === user?.id || item.username === String(user?.username || "").toLowerCase());
 }
 
 function hashPassword(password) {
@@ -1101,6 +1233,39 @@ function isLegacyPasswordHash(passwordHash) {
   return typeof passwordHash === "string" && /^[a-f0-9]{64}$/i.test(passwordHash);
 }
 
+function isUserLocked(user) {
+  const lockedUntil = user?.lockedUntil ? new Date(user.lockedUntil).getTime() : 0;
+  return Number.isFinite(lockedUntil) && lockedUntil > Date.now();
+}
+
+function lockRemainingSeconds(user) {
+  const lockedUntil = user?.lockedUntil ? new Date(user.lockedUntil).getTime() : 0;
+  return Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
+}
+
+function registerJsonFailedLogin(db, user) {
+  if (!user) return null;
+  normalizeSecurityUser(user);
+  user.failedLoginCount += 1;
+  if (user.failedLoginCount >= loginLockThreshold) {
+    user.lockedUntil = new Date(Date.now() + loginLockDurationMs).toISOString();
+  }
+  return user;
+}
+
+function resetJsonLoginFailures(user) {
+  if (!user) return;
+  user.failedLoginCount = 0;
+  user.lockedUntil = "";
+}
+
+function validatePasswordChangePayload(currentPassword, nextPassword) {
+  if (!String(currentPassword || "")) return "Current password is required.";
+  if (String(nextPassword || "").length < 10) return "New password must be at least 10 characters.";
+  if (String(currentPassword) === String(nextPassword)) return "New password must be different from the current password.";
+  return "";
+}
+
 async function verifyPassword(password, user) {
   const passwordHash = user?.passwordHash;
   if (!passwordHash) return false;
@@ -1110,10 +1275,15 @@ async function verifyPassword(password, user) {
   return bcrypt.compare(String(password), passwordHash);
 }
 
-function createSession(user) {
+function createSession(db, user) {
   const token = randomUUID();
-  sessions.set(token, { userId: user.id, createdAt: Date.now(), expiresAt: Date.now() + sessionDurationMs });
+  db.sessions = Array.isArray(db.sessions) ? db.sessions : [];
+  db.sessions.push({ token, userId: user.id, createdAt: Date.now(), expiresAt: Date.now() + sessionDurationMs });
   return token;
+}
+
+function createTemporaryPassword() {
+  return `Change-${randomUUID().replace(/-/g, "").slice(0, 18)}`;
 }
 
 function getBearerToken(request) {
@@ -1124,9 +1294,10 @@ function getBearerToken(request) {
 function getUserFromRequest(request, db) {
   const token = getBearerToken(request);
   if (!token) return null;
-  const session = sessions.get(token);
+  db.sessions = Array.isArray(db.sessions) ? db.sessions : [];
+  const session = db.sessions.find((item) => item.token === token);
   if (!session || session.expiresAt < Date.now()) {
-    sessions.delete(token);
+    db.sessions = db.sessions.filter((item) => item.token !== token && Number(item.expiresAt || 0) > Date.now());
     return null;
   }
   return db.users.find((item) => item.id === session.userId && item.active !== false) || null;
@@ -1144,6 +1315,10 @@ function publicUser(user) {
     name: user.name,
     role: user.role,
     active: user.active !== false,
+    mustChangePassword: user.mustChangePassword === true,
+    failedLoginCount: Number(user.failedLoginCount || 0),
+    lockedUntil: user.lockedUntil || "",
+    passwordChangedAt: user.passwordChangedAt || "",
     projectIds: Array.isArray(user.projectIds) ? user.projectIds : []
   };
 }
@@ -1169,14 +1344,17 @@ function filterDbForUser(db, user) {
     points,
     records: db.records.filter((item) => allowedProjects.has(item.projectId) && equipmentIds.has(item.equipmentId) && pointIds.has(item.pointId)),
     media: (db.media || []).filter((item) => allowedProjects.has(item.projectId) && equipmentIds.has(item.equipmentId)),
-    auditLogs: (db.auditLogs || []).filter((item) => allowedProjects.has(item.projectId) || item.userId === user.id)
-  });
+    auditLogs: (db.auditLogs || []).filter((item) => allowedProjects.has(item.projectId) || item.userId === user.id),
+    users: []
+  }, { includeUsers: false });
 }
 
-function sanitizeDbForClient(db) {
+function sanitizeDbForClient(db, options = {}) {
+  const includeUsers = options.includeUsers !== false;
+  const { sessions: _sessions, ...clientDb } = db;
   return {
-    ...db,
-    users: (db.users || []).map(publicUser),
+    ...clientDb,
+    users: includeUsers ? (db.users || []).map(publicUser) : [],
     auditLogs: [...(db.auditLogs || [])].slice(-300).reverse()
   };
 }

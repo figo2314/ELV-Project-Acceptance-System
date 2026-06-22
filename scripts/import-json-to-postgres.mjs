@@ -16,6 +16,8 @@ const defaultUsers = [
   { id: "u-engineer", username: "engineer", name: "Site Engineer", role: "engineer", password: "engineer123", active: true, projectIds: ["p1"] },
   { id: "u-field", username: "field", name: "Field User", role: "field", password: "field123", active: true, projectIds: ["p1"] }
 ];
+const defaultUserIds = new Set(defaultUsers.map((user) => user.id));
+const defaultUsernames = new Set(defaultUsers.map((user) => user.username));
 
 async function main() {
   const db = JSON.parse((await readFile(sourcePath, "utf8")).replace(/^\uFEFF/, ""));
@@ -226,6 +228,12 @@ async function importUsers(tx, db) {
         role,
         active: user.active !== false,
         passwordHash: String(user.passwordHash || bcrypt.hashSync("changeme123", Number(process.env.BCRYPT_ROUNDS || 12))),
+        mustChangePassword: Object.prototype.hasOwnProperty.call(user, "mustChangePassword")
+          ? user.mustChangePassword === true
+          : defaultUserIds.has(String(user.id)) || defaultUsernames.has(String(user.username || "").toLowerCase()),
+        failedLoginCount: Number(user.failedLoginCount || 0),
+        lockedUntil: parseDateTime(user.lockedUntil),
+        passwordChangedAt: parseDateTime(user.passwordChangedAt),
         createdAt: parseDateTime(user.createdAt) || new Date(),
         projectAccess: {
           create: accessibleProjects.map((projectId) => ({ projectId }))

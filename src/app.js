@@ -490,7 +490,7 @@ function render() {
   document.querySelector("#app").innerHTML = `
     <main class="shell">
       ${renderTopbar()}
-      ${state.authToken ? (state.view === "field" ? renderField() : renderAdmin()) : renderLogin()}
+      ${state.authToken ? (state.currentUser?.mustChangePassword ? renderPasswordChange() : (state.view === "field" ? renderField() : renderAdmin())) : renderLogin()}
       ${renderIssueModal()}
       ${renderFieldAddPointModal()}
       ${renderMediaUploadModal()}
@@ -508,15 +508,42 @@ function renderLogin() {
         <div>
           <p class="eyebrow">Access Control</p>
           <h2>Sign in to ELV Acceptance</h2>
-          <span>Demo users: admin/admin123, manager/manager123, engineer/engineer123, field/field123</span>
+          <span>Use your company account. Contact an administrator if this is your first login.</span>
         </div>
         <label>Username
-          <input name="username" value="${escapeHtml(state.loginUsername || "admin")}" autocomplete="username" />
+          <input name="username" value="${escapeHtml(state.loginUsername || "")}" autocomplete="username" />
         </label>
         <label>Password
-          <input name="password" type="password" value="admin123" autocomplete="current-password" />
+          <input name="password" type="password" autocomplete="current-password" />
         </label>
         <button class="primary" type="submit">Login</button>
+      </form>
+    </section>
+  `;
+}
+
+function renderPasswordChange() {
+  return `
+    <section class="login-shell">
+      <form class="login-card password-card" data-password-change-form>
+        <div>
+          <p class="eyebrow">Security Required</p>
+          <h2>Change your password</h2>
+          <span>Your administrator has issued a temporary or reset password. Create a new password before continuing.</span>
+        </div>
+        <label>Current password
+          <input name="currentPassword" type="password" autocomplete="current-password" />
+        </label>
+        <label>New password
+          <input name="newPassword" type="password" autocomplete="new-password" minlength="10" />
+        </label>
+        <label>Confirm new password
+          <input name="confirmPassword" type="password" autocomplete="new-password" minlength="10" />
+        </label>
+        <div class="password-actions">
+          <button class="primary" type="submit">Update password</button>
+          <button class="ghost" type="button" data-action="logout">Logout</button>
+        </div>
       </form>
     </section>
   `;
@@ -1728,6 +1755,12 @@ function renderUserManagement() {
 
 function renderUserRow(user, isNew = false) {
   const disabled = canManageUsers() ? "" : "disabled";
+  const locked = isUserLocked(user);
+  const securityBadges = [
+    user.mustChangePassword ? `<span class="security-badge warning">Password change</span>` : "",
+    locked ? `<span class="security-badge danger">Locked</span>` : "",
+    Number(user.failedLoginCount || 0) ? `<span class="security-badge">${Number(user.failedLoginCount || 0)} failed</span>` : ""
+  ].join("");
   return `
     <form class="user-row" data-user-editor="${escapeHtml(user.id || "")}">
       <input name="name" value="${escapeHtml(user.name || "")}" placeholder="Name" ${disabled} />
@@ -1736,14 +1769,27 @@ function renderUserRow(user, isNew = false) {
         ${["admin", "manager", "engineer", "field"].map((role) => option(role, role, user.role || "field")).join("")}
       </select>
       <input name="projectIds" value="${escapeHtml((user.projectIds || []).join(","))}" placeholder="Project IDs e.g. p1,p2" ${disabled} />
-      <input name="password" type="password" placeholder="${isNew ? "Password or default changeme123" : "Reset password"}" ${disabled} />
+      <input name="password" type="password" placeholder="${isNew ? "Temporary password" : "Reset password"}" ${disabled} />
       <select name="active" ${disabled}>
         ${option("true", "Active", user.active !== false ? "true" : "false")}
         ${option("false", "Inactive", user.active === false ? "false" : "true")}
       </select>
-      ${canManageUsers() ? `<button class="ghost" type="submit">${isNew ? "Add" : t("saveChanges")}</button>` : `<span class="badge">${escapeHtml(user.role || "")}</span>`}
+      <label class="force-password-flag">
+        <input type="checkbox" name="mustChangePassword" value="true" ${user.mustChangePassword || isNew ? "checked" : ""} ${disabled} />
+        Force change
+      </label>
+      <div class="user-security-state">${securityBadges || `<span class="security-badge ok">OK</span>`}</div>
+      ${canManageUsers() ? `
+        ${locked && !isNew ? `<button class="ghost" type="button" data-unlock-user="${escapeHtml(user.id || "")}">Unlock</button>` : ""}
+        <button class="ghost" type="submit">${isNew ? "Add" : t("saveChanges")}</button>
+      ` : `<span class="badge">${escapeHtml(user.role || "")}</span>`}
     </form>
   `;
+}
+
+function isUserLocked(user) {
+  const lockedUntil = user?.lockedUntil ? new Date(user.lockedUntil).getTime() : 0;
+  return Number.isFinite(lockedUntil) && lockedUntil > Date.now();
 }
 
 function renderAuditLog() {
@@ -2400,6 +2446,27 @@ async function login(event) {
   }
 }
 
+async function changePassword(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  if (payload.newPassword !== payload.confirmPassword) {
+    flash("New passwords do not match");
+    return;
+  }
+  try {
+    const response = await apiPost("/auth/change-password", {
+      currentPassword: payload.currentPassword,
+      newPassword: payload.newPassword
+    });
+    setData(response.data);
+    setState({ currentUser: response.user, toast: "Password updated" });
+    window.setTimeout(() => setState({ toast: "" }), 1800);
+  } catch (error) {
+    flash(error.message || "Password update failed");
+  }
+}
+
 async function logout() {
   try {
     if (state.authToken) await apiPost("/auth/logout", {});
@@ -2604,6 +2671,7 @@ function bindIssueDetailEvents() {
 
 function bindEvents() {
   document.querySelector("[data-login-form]")?.addEventListener("submit", login);
+  document.querySelector("[data-password-change-form]")?.addEventListener("submit", changePassword);
   document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
@@ -2732,6 +2800,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-user-editor]").forEach((form) => {
     form.addEventListener("submit", saveUser);
+  });
+  document.querySelectorAll("[data-unlock-user]").forEach((button) => {
+    button.addEventListener("click", () => unlockUser(button.dataset.unlockUser));
   });
   bindStatusPickers();
   document.querySelectorAll("[data-field-point-editor]").forEach((form) => {
@@ -3299,6 +3370,7 @@ async function saveUser(event) {
   const payload = Object.fromEntries(new FormData(form).entries());
   if (form.dataset.userEditor) payload.id = form.dataset.userEditor;
   payload.active = payload.active !== "false";
+  payload.mustChangePassword = payload.mustChangePassword === "true";
   payload.projectIds = String(payload.projectIds || "").split(",").map((item) => item.trim()).filter(Boolean);
   if (!payload.password) delete payload.password;
   try {
@@ -3307,6 +3379,17 @@ async function saveUser(event) {
     flash(t("updateSuccess"));
   } catch (error) {
     flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
+  }
+}
+
+async function unlockUser(userId) {
+  if (!canManageUsers() || !userId) return;
+  try {
+    const response = await apiPost("/admin/user/unlock", { id: userId });
+    setData(response);
+    flash("User unlocked");
+  } catch (error) {
+    flash(error.status === 403 ? "Permission denied" : error.message || t("serverOffline"));
   }
 }
 

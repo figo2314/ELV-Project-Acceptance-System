@@ -282,6 +282,69 @@ button {
   font-size: 13px;
 }
 
+.password-card {
+  border-top: 4px solid var(--brand);
+}
+
+.password-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.force-password-flag {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.force-password-flag input {
+  min-height: 0;
+  width: auto;
+}
+
+.user-security-state {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.security-badge {
+  background: #eef2f7;
+  border: 1px solid #d8e0ea;
+  border-radius: 999px;
+  color: #475569;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.security-badge.ok {
+  background: #e8f7ef;
+  border-color: #bfe8cf;
+  color: #166534;
+}
+
+.security-badge.warning {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #b45309;
+}
+
+.security-badge.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
 .icon-btn,
 .mode-btn,
 .ghost,
