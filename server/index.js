@@ -4,7 +4,10 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import bcrypt from "bcryptjs";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +21,14 @@ const jsonLimit = process.env.API_JSON_LIMIT || "25mb";
 const maxUploadFiles = 12;
 const maxUploadFileBytes = 50 * 1024 * 1024;
 const maxUploadTotalBytes = 100 * 1024 * 1024;
+const sessionDurationMs = 1000 * 60 * 60 * 12;
+const bcryptRounds = Number(process.env.BCRYPT_ROUNDS || 12);
+const allowedOrigins = String(
+  process.env.CORS_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
+)
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
 const sessions = new Map();
@@ -64,9 +75,38 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maxUploadFileBytes, files: maxUploadFiles }
 });
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.API_RATE_LIMIT || 600),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please wait a moment and try again." }
+});
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.LOGIN_RATE_LIMIT || 10),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: "Too many login attempts. Please wait before trying again." }
+});
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.UPLOAD_RATE_LIMIT || 60),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many upload requests. Please wait a moment and try again." }
+});
 
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
 app.use((request, response, next) => {
-  response.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = request.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+  } else if (!origin) {
+    response.setHeader("Access-Control-Allow-Origin", allowedOrigins[0] || "http://127.0.0.1:5173");
+  }
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (request.method === "OPTIONS") {
@@ -75,6 +115,7 @@ app.use((request, response, next) => {
   }
   next();
 });
+app.use("/api", apiLimiter);
 app.use(express.json({ limit: jsonLimit }));
 app.use("/uploads", express.static(uploadDir));
 
@@ -142,16 +183,19 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true, time: Date.now() });
 });
 
-app.post("/api/auth/login", asyncRoute(async (request, response) => {
+app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) => {
   const username = String(request.body?.username || "").trim().toLowerCase();
   const password = String(request.body?.password || "");
   const db = await readDb();
   const user = db.users.find((item) => item.username.toLowerCase() === username && item.active !== false);
-  if (!user || user.passwordHash !== hashPassword(password)) {
+  if (!user || !(await verifyPassword(password, user))) {
     appendAuditLog(db, null, "login.failed", "auth", username || "unknown", { username }, false);
     await writeDb(db);
     response.status(401).json({ error: "Invalid username or password." });
     return;
+  }
+  if (isLegacyPasswordHash(user.passwordHash)) {
+    user.passwordHash = hashPassword(password);
   }
   const token = createSession(user);
   appendAuditLog(db, user, "login.success", "auth", user.id);
@@ -261,7 +305,7 @@ app.post("/api/sync", requireAuth(), async (request, response) => {
   response.json({ ...filterDbForUser(db, request.auth.user), conflicts });
 });
 
-app.post("/api/attachments", requireAuth(), upload.array("files", maxUploadFiles), asyncRoute(async (request, response) => {
+app.post("/api/attachments", requireAuth(), uploadLimiter, upload.array("files", maxUploadFiles), asyncRoute(async (request, response) => {
   const multipartFiles = Array.isArray(request.files) ? request.files : [];
   const files = multipartFiles.length ? multipartFiles : Array.isArray(request.body.files) ? request.body.files : [];
   if (!files.length) {
@@ -285,6 +329,7 @@ app.post("/api/attachments", requireAuth(), upload.array("files", maxUploadFiles
 app.post(
   "/api/admin/media-upload",
   requireAuth(["admin", "manager", "engineer"]),
+  uploadLimiter,
   upload.array("files", maxUploadFiles),
   asyncRoute(async (request, response) => {
     const body = request.body || {};
@@ -741,12 +786,29 @@ function ensureSecurityData(db) {
 }
 
 function hashPassword(password) {
+  return bcrypt.hashSync(String(password), bcryptRounds);
+}
+
+function legacyPasswordHash(password) {
   return createHash("sha256").update(`elv:${password}`).digest("hex");
+}
+
+function isLegacyPasswordHash(passwordHash) {
+  return typeof passwordHash === "string" && /^[a-f0-9]{64}$/i.test(passwordHash);
+}
+
+async function verifyPassword(password, user) {
+  const passwordHash = user?.passwordHash;
+  if (!passwordHash) return false;
+  if (isLegacyPasswordHash(passwordHash)) {
+    return passwordHash === legacyPasswordHash(password);
+  }
+  return bcrypt.compare(String(password), passwordHash);
 }
 
 function createSession(user) {
   const token = randomUUID();
-  sessions.set(token, { userId: user.id, createdAt: Date.now(), expiresAt: Date.now() + 1000 * 60 * 60 * 12 });
+  sessions.set(token, { userId: user.id, createdAt: Date.now(), expiresAt: Date.now() + sessionDurationMs });
   return token;
 }
 
