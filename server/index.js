@@ -50,6 +50,19 @@ const allowedOrigins = String(
   .map((item) => item.trim())
   .filter(Boolean);
 const accessLogEnabled = String(process.env.ACCESS_LOG || "true").toLowerCase() !== "false";
+const metricsStartedAt = Date.now();
+const metrics = {
+  requestsTotal: 0,
+  requestsByRoute: {},
+  statusCodes: {},
+  errorsTotal: 0,
+  failedLogins: 0,
+  syncConflicts: 0,
+  uploadFailures: 0,
+  importFailures: 0,
+  totalDurationMs: 0,
+  maxDurationMs: 0
+};
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
 const sessions = new Map();
@@ -165,6 +178,9 @@ app.use((error, request, response, next) => {
 
 function sendApiError(response, error, request) {
   if (response.headersSent) return;
+  metrics.errorsTotal += 1;
+  if (request?.path?.includes("/upload") || request?.path?.includes("/attachments")) metrics.uploadFailures += 1;
+  if (request?.path?.includes("/import")) metrics.importFailures += 1;
   logEvent("warn", "API request rejected", {
     requestId: request?.id,
     errorType: error.type || error.name || "Error",
@@ -194,8 +210,10 @@ function errorPayload(message, request) {
 }
 
 function logAccess(request, response) {
-  if (!accessLogEnabled || !request.path?.startsWith("/api")) return;
+  if (!request.path?.startsWith("/api")) return;
   const durationMs = Date.now() - Number(request.startedAt || Date.now());
+  recordRequestMetrics(request, response, durationMs);
+  if (!accessLogEnabled) return;
   logEvent(response.statusCode >= 500 ? "error" : "info", "api.request", {
     requestId: request.id,
     method: request.method,
@@ -226,6 +244,41 @@ function logEvent(level, message, details = {}) {
     return;
   }
   console.log(line);
+}
+
+function recordRequestMetrics(request, response, durationMs) {
+  metrics.requestsTotal += 1;
+  metrics.totalDurationMs += durationMs;
+  metrics.maxDurationMs = Math.max(metrics.maxDurationMs, durationMs);
+  const status = String(response.statusCode);
+  metrics.statusCodes[status] = (metrics.statusCodes[status] || 0) + 1;
+  if (response.statusCode >= 500) metrics.errorsTotal += 1;
+  const key = `${request.method} ${normalizeMetricPath(request.path || "")}`;
+  metrics.requestsByRoute[key] = (metrics.requestsByRoute[key] || 0) + 1;
+}
+
+function normalizeMetricPath(pathname) {
+  return pathname
+    .replace(/\/[a-z]+_[a-z0-9_]+/gi, "/:id")
+    .replace(/\/[0-9a-f-]{12,}/gi, "/:id");
+}
+
+function metricsSnapshot() {
+  return {
+    startedAt: new Date(metricsStartedAt).toISOString(),
+    uptimeSeconds: Math.round((Date.now() - metricsStartedAt) / 1000),
+    dataStore,
+    requestsTotal: metrics.requestsTotal,
+    statusCodes: metrics.statusCodes,
+    requestsByRoute: metrics.requestsByRoute,
+    averageDurationMs: metrics.requestsTotal ? Math.round(metrics.totalDurationMs / metrics.requestsTotal) : 0,
+    maxDurationMs: metrics.maxDurationMs,
+    errorsTotal: metrics.errorsTotal,
+    failedLogins: metrics.failedLogins,
+    syncConflicts: metrics.syncConflicts,
+    uploadFailures: metrics.uploadFailures,
+    importFailures: metrics.importFailures
+  };
 }
 
 const asyncRoute = (handler) => async (request, response) => {
@@ -285,12 +338,17 @@ app.get("/api/ready", asyncRoute(async (_request, response) => {
   response.status(ok ? 200 : 503).json({ ok, time: Date.now(), dataStore, storage, database });
 }));
 
+app.get("/api/metrics", requireAuth(["admin"]), (_request, response) => {
+  response.json(metricsSnapshot());
+});
+
 app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) => {
   const username = String(request.body?.username || "").trim().toLowerCase();
   const password = String(request.body?.password || "");
   if (isPostgresMode) {
     const user = await findPostgresUserByUsername(username);
     if (!user || !(await verifyPassword(password, user))) {
+      metrics.failedLogins += 1;
       await appendPostgresAuditLog(null, "login.failed", "auth", username || "unknown", { username }, false);
       response.status(401).json({ error: "Invalid username or password." });
       return;
@@ -307,6 +365,7 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
   const db = await readDb();
   const user = db.users.find((item) => item.username.toLowerCase() === username && item.active !== false);
   if (!user || !(await verifyPassword(password, user))) {
+    metrics.failedLogins += 1;
     appendAuditLog(db, null, "login.failed", "auth", username || "unknown", { username }, false);
     await writeDb(db);
     response.status(401).json({ error: "Invalid username or password." });
@@ -413,6 +472,7 @@ app.post("/api/sync", requireAuth(), async (request, response) => {
   const incoming = Array.isArray(request.body.records) ? request.body.records : [];
   if (isPostgresMode) {
     const result = await syncPostgresRecords(request.auth.user, incoming);
+    metrics.syncConflicts += result.conflicts.length;
     response.json({ ...result.data, conflicts: result.conflicts });
     return;
   }
@@ -444,6 +504,7 @@ app.post("/api/sync", requireAuth(), async (request, response) => {
 
     return db;
   });
+  metrics.syncConflicts += conflicts.length;
   response.json({ ...filterDbForUser(db, request.auth.user), conflicts });
 });
 
@@ -451,6 +512,7 @@ app.post("/api/attachments", requireAuth(), uploadLimiter, upload.array("files",
   const multipartFiles = Array.isArray(request.files) ? request.files : [];
   const files = multipartFiles.length ? multipartFiles : Array.isArray(request.body.files) ? request.body.files : [];
   if (!files.length) {
+    metrics.uploadFailures += 1;
     response.status(400).json({ error: "Missing attachment files." });
     return;
   }
@@ -458,6 +520,7 @@ app.post("/api/attachments", requireAuth(), uploadLimiter, upload.array("files",
   await mkdir(uploadDir, { recursive: true });
   const totalSize = files.reduce((sum, file) => sum + Number(file.size || file.buffer?.length || 0), 0);
   if (totalSize > maxUploadTotalBytes) {
+    metrics.uploadFailures += 1;
     response.status(413).json({ error: `Upload is too large. Upload less than ${Math.round(maxUploadTotalBytes / 1024 / 1024)} MB at a time.` });
     return;
   }
@@ -479,10 +542,12 @@ app.post(
     const totalSize = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
     const comments = String(body.comments || "").trim();
     if (!files.length && !comments) {
+      metrics.uploadFailures += 1;
       response.status(400).json({ error: "Media file or comment is required." });
       return;
     }
     if (totalSize > maxUploadTotalBytes) {
+      metrics.uploadFailures += 1;
       response.status(413).json({ error: `Upload is too large. Upload less than ${Math.round(maxUploadTotalBytes / 1024 / 1024)} MB at a time.` });
       return;
     }
@@ -805,12 +870,14 @@ app.post("/api/admin/point", requireAuth(["admin", "manager", "engineer", "field
 app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(async (request, response) => {
   const { fileName = "equipment.xlsx", base64 } = request.body;
   if (!base64) {
+    metrics.importFailures += 1;
     response.status(400).json({ error: "Missing base64 Excel payload." });
     return;
   }
 
   const rows = await readImportRows(fileName, base64);
   if (!rows.length) {
+    metrics.importFailures += 1;
     response.status(400).json({ error: "Excel file does not contain any import rows." });
     return;
   }
@@ -828,6 +895,7 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
       dueAliases
     });
     if (!result.importedCount) {
+      metrics.importFailures += 1;
       response.status(400).json({ error: "Excel file does not contain any valid equipment rows. Please check the Equipment column or use the exported template." });
       return;
     }
@@ -911,6 +979,7 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
     return db;
   });
   if (!imported.length) {
+    metrics.importFailures += 1;
     response.status(400).json({ error: "Excel file does not contain any valid equipment rows. Please check the Equipment column or use the exported template." });
     return;
   }

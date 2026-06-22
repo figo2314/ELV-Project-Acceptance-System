@@ -63,11 +63,32 @@ async function main() {
   assert(imported.importedCount >= 1, "Import did not create equipment.");
   assert(imported.data.projects.some((project) => project.name === "Smoke Import Project"), "Imported project missing from bootstrap.");
 
+  const failedLogin = await apiFetch("/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "wrong-password" },
+    expectedStatus: 401
+  });
+  assert(failedLogin.error, "Failed login did not return an error payload.");
+
+  const managerLogin = await apiPost("/auth/login", { username: "manager", password: "manager123" });
+  await apiFetch("/metrics", {
+    method: "GET",
+    token: managerLogin.token,
+    expectedStatus: 403
+  });
+
+  const metrics = await apiGet("/metrics", token);
+  assert(metrics.requestsTotal >= 1, "Metrics did not record requests.");
+  assert(metrics.dataStore === "postgres", "Metrics did not report postgres mode.");
+  assert(metrics.failedLogins >= 1, "Metrics did not record failed logins.");
+
   console.log(JSON.stringify({
     ok: true,
-    checks: ["ready", "login", "point", "sync", "media", "import"],
+    checks: ["ready", "login", "point", "sync", "media", "import", "metrics"],
     projectCount: imported.data.projects.length,
-    recordCount: imported.data.records.length
+    recordCount: imported.data.records.length,
+    requestsTotal: metrics.requestsTotal,
+    failedLogins: metrics.failedLogins
   }, null, 2));
 }
 
@@ -80,6 +101,7 @@ async function apiPost(path, body, token) {
 }
 
 async function apiFetch(path, options = {}) {
+  const expectedStatus = options.expectedStatus || 200;
   const response = await fetch(`${apiBase}${path}`, {
     method: options.method || "GET",
     headers: {
@@ -90,7 +112,7 @@ async function apiFetch(path, options = {}) {
   });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) {
+  if (response.status !== expectedStatus) {
     throw new Error(`${options.method || "GET"} ${path} failed: ${response.status} ${text}`);
   }
   return payload;
