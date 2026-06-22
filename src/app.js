@@ -1645,7 +1645,7 @@ function renderImportPage() {
       <label class="drop-zone" data-drop-zone>
         <strong>${t("dropExcel")}</strong>
         <span>${t("templateHint")}</span>
-        <input data-action="import-excel" type="file" accept=".xlsx,.xls,.csv" />
+        <input data-action="import-excel" type="file" accept=".xlsx,.csv" />
       </label>
       <div class="import-actions">
         <a class="file-button" href="${API_BASE}/template/equipment">${t("downloadTemplate")}</a>
@@ -3878,11 +3878,100 @@ async function deleteLocalAttachments(localIds) {
 }
 
 async function readExcelRows(file) {
-  const XLSX = await import("xlsx");
+  const name = String(file?.name || "").toLowerCase();
+  if (name.endsWith(".csv")) {
+    const content = await file.text();
+    return csvTextToRows(content).map(normalizeImportRow).filter((row) => row.Project || row.Location || row.Equipment || row.Point);
+  }
+  if (!name.endsWith(".xlsx")) {
+    throw new Error("Please use .xlsx or .csv import files.");
+  }
+  const ExcelJSModule = await import("exceljs");
+  const ExcelJS = ExcelJSModule.default || ExcelJSModule;
   const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(sheet, { defval: "" }).map(normalizeImportRow).filter((row) => row.Project || row.Location || row.Equipment || row.Point);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) return [];
+  return worksheetToImportRows(worksheet).map(normalizeImportRow).filter((row) => row.Project || row.Location || row.Equipment || row.Point);
+}
+
+function worksheetToImportRows(worksheet) {
+  const headers = [];
+  worksheet.getRow(1).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+    headers[columnNumber - 1] = importCellToText(cell.value);
+  });
+  const rows = [];
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const item = {};
+    headers.forEach((header, index) => {
+      if (header) item[header] = importCellToText(row.getCell(index + 1).value);
+    });
+    if (Object.values(item).some((value) => String(value).trim())) rows.push(item);
+  });
+  return rows;
+}
+
+function importCellToText(value) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "object") {
+    if (value.text) return String(value.text).trim();
+    if (value.result !== undefined) return importCellToText(value.result);
+    if (Array.isArray(value.richText)) return value.richText.map((item) => item.text || "").join("").trim();
+  }
+  return String(value).trim();
+}
+
+function csvTextToRows(content) {
+  const rows = parseCsvText(String(content || "").replace(/^\uFEFF/, ""));
+  if (!rows.length) return [];
+  const headers = rows[0].map((header) => String(header || "").trim());
+  return rows.slice(1).map((row) => {
+    const item = {};
+    headers.forEach((header, index) => {
+      if (header) item[header] = String(row[index] || "").trim();
+    });
+    return item;
+  }).filter((item) => Object.values(item).some((value) => String(value).trim()));
+}
+
+function parseCsvText(content) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      value = "";
+      continue;
+    }
+    value += char;
+  }
+  row.push(value);
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
 }
 
 function normalizeImportRow(row) {

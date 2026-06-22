@@ -33,7 +33,7 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 
 ## P1 - Excel Import
 
-- [ ] Replace or isolate the `xlsx` dependency because `npm audit` reports high-severity issues with no direct fix.
+- [x] Replace the `xlsx` dependency because `npm audit` reported high-severity issues with no direct fix.
 - [ ] Add server-side duplicate detection and import preview before committing rows.
 - [ ] Add import job history with who imported, when, source file, row count, rejected rows, and rollback status.
 

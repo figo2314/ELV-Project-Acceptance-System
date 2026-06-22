@@ -5,10 +5,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
+import ExcelJS from "exceljs";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
-import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -221,7 +221,7 @@ app.get("/api/bootstrap", requireAuth(), async (request, response) => {
   response.json(filterDbForUser(await readDb(), request.auth.user));
 });
 
-app.get("/api/template/equipment", (_request, response) => {
+app.get("/api/template/equipment", asyncRoute(async (_request, response) => {
   const rows = [
     {
       Project: "Harbour Tower BMS Upgrade",
@@ -250,27 +250,31 @@ app.get("/api/template/equipment", (_request, response) => {
       Notes: "Repeat Equipment with different Point values for multiple points under the same device."
     }
   ];
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.json_to_sheet(rows);
-  worksheet["!cols"] = [
-    { wch: 30 },
-    { wch: 32 },
-    { wch: 14 },
-    { wch: 24 },
-    { wch: 18 },
-    { wch: 28 },
-    { wch: 18 },
-    { wch: 24 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 72 }
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "ELV Project Acceptance System";
+  workbook.created = new Date();
+  const worksheet = workbook.addWorksheet("Equipment Import");
+  worksheet.columns = [
+    { header: "Project", key: "Project", width: 30 },
+    { header: "Location", key: "Location", width: 32 },
+    { header: "Team", key: "Team", width: 14 },
+    { header: "Equipment", key: "Equipment", width: 24 },
+    { header: "Type", key: "Type", width: 18 },
+    { header: "Point", key: "Point", width: 28 },
+    { header: "Point Type", key: "Point Type", width: 18 },
+    { header: "Reference", key: "Reference", width: 24 },
+    { header: "Assignee", key: "Assignee", width: 14 },
+    { header: "Due", key: "Due", width: 14 },
+    { header: "Notes", key: "Notes", width: 72 }
   ];
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Equipment Import");
-  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  worksheet.addRows(rows);
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   response.setHeader("Content-Disposition", "attachment; filename=\"elv-equipment-import-template.xlsx\"");
   response.send(buffer);
-});
+}));
 
 app.post("/api/sync", requireAuth(), async (request, response) => {
   const incoming = Array.isArray(request.body.records) ? request.body.records : [];
@@ -615,13 +619,7 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
     return;
   }
 
-  const workbook = readImportWorkbook(base64);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  if (!sheet) {
-    response.status(400).json({ error: "Excel file does not contain a readable worksheet." });
-    return;
-  }
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const rows = await readImportRows(fileName, base64);
   if (!rows.length) {
     response.status(400).json({ error: "Excel file does not contain any import rows." });
     return;
@@ -995,19 +993,115 @@ function appendMediaRecords(db, equipment, payload) {
   });
 }
 
-function readImportWorkbook(base64) {
+async function readImportRows(fileName, base64) {
   try {
     if (!/^[A-Za-z0-9+/=\s]+$/.test(String(base64 || ""))) {
       throw new Error("Invalid base64 payload.");
     }
     const buffer = Buffer.from(base64, "base64");
-    if (!buffer.length) throw new Error("Empty Excel payload.");
-    return XLSX.read(buffer, { type: "buffer" });
-  } catch {
+    if (!buffer.length) throw new Error("Empty import payload.");
+    const name = String(fileName || "").toLowerCase();
+    if (name.endsWith(".csv")) return parseCsvRows(buffer.toString("utf8"));
+    if (!name.endsWith(".xlsx")) {
+      const error = new Error("Unsupported import file. Please use .xlsx or .csv.");
+      error.status = 400;
+      throw error;
+    }
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      const error = new Error("Excel file does not contain a readable worksheet.");
+      error.status = 400;
+      throw error;
+    }
+    return worksheetToRows(worksheet);
+  } catch (caughtError) {
+    if (caughtError?.status) throw caughtError;
     const error = new Error("Unable to read Excel file. Please use the exported template format.");
     error.status = 400;
     throw error;
   }
+}
+
+function worksheetToRows(worksheet) {
+  const headers = [];
+  worksheet.getRow(1).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+    headers[columnNumber - 1] = cellToText(cell.value);
+  });
+  const rows = [];
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const item = {};
+    headers.forEach((header, index) => {
+      if (!header) return;
+      item[header] = cellToText(row.getCell(index + 1).value);
+    });
+    if (Object.values(item).some((value) => String(value).trim())) rows.push(item);
+  });
+  return rows;
+}
+
+function cellToText(value) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "object") {
+    if (value.text) return String(value.text);
+    if (value.result !== undefined) return cellToText(value.result);
+    if (Array.isArray(value.richText)) return value.richText.map((item) => item.text || "").join("");
+    if (value.hyperlink && value.text) return String(value.text);
+  }
+  return String(value).trim();
+}
+
+function parseCsvRows(content) {
+  const rows = parseCsv(content.replace(/^\uFEFF/, ""));
+  if (!rows.length) return [];
+  const headers = rows[0].map((header) => String(header || "").trim());
+  return rows.slice(1).map((row) => {
+    const item = {};
+    headers.forEach((header, index) => {
+      if (header) item[header] = String(row[index] || "").trim();
+    });
+    return item;
+  }).filter((item) => Object.values(item).some((value) => String(value).trim()));
+}
+
+function parseCsv(content) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      value += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      value = "";
+      continue;
+    }
+    value += char;
+  }
+  row.push(value);
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  return rows;
 }
 
 function parseDataUrl(dataUrl) {
