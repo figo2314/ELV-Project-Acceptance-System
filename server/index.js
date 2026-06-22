@@ -13,15 +13,19 @@ import { dataStore, isPostgresMode, startupMode } from "./config.js";
 import { checkPostgresReady, disconnectPrisma } from "./prisma.js";
 import {
   appendPostgresAuditLog,
+  createPostgresMedia,
   createPostgresSession,
   deletePostgresSession,
   findPostgresUserById,
   findPostgresUserByUsername,
   getPostgresBootstrapForUser,
   getPostgresUserByToken,
+  importPostgresEquipmentRows,
   syncPostgresRecords,
+  updatePostgresProject,
   updatePostgresRow,
   upsertPostgresEquipment,
+  upsertPostgresUser,
   upsertPostgresPoint,
   upgradePostgresPasswordHash
 } from "./postgresRepository.js";
@@ -431,6 +435,16 @@ app.post(
         savedFiles.push(await saveMulterAttachment(file));
       }
 
+      if (isPostgresMode) {
+        const result = await createPostgresMedia(request.auth.user, body, savedFiles);
+        if (sendMutationError(response, result)) {
+          await deleteUploadedFiles(savedFiles);
+          return;
+        }
+        response.json(result.data);
+        return;
+      }
+
       const result = await withDbMutation(async (db) => {
         const user = getFreshUser(db, request.auth.user);
         db.media = Array.isArray(db.media) ? db.media : [];
@@ -517,6 +531,12 @@ app.post("/api/admin/equipment", requireAuth(["admin", "manager", "engineer"]), 
 
 app.post("/api/admin/project", requireAuth(["admin", "manager"]), async (request, response) => {
   const body = request.body || {};
+  if (isPostgresMode) {
+    const result = await updatePostgresProject(request.auth.user, body);
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     const index = db.projects.findIndex((item) => item.id === body.id);
@@ -538,6 +558,12 @@ app.post("/api/admin/project", requireAuth(["admin", "manager"]), async (request
 
 app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) => {
   const body = request.body || {};
+  if (isPostgresMode) {
+    const result = await upsertPostgresUser(request.auth.user, body);
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     const username = String(body.username || "").trim().toLowerCase();
@@ -573,6 +599,12 @@ app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) =>
 
 app.post("/api/admin/media", requireAuth(["admin", "manager", "engineer"]), async (request, response) => {
   const body = request.body || {};
+  if (isPostgresMode) {
+    const result = await createPostgresMedia(request.auth.user, body, Array.isArray(body.files) ? body.files : []);
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
   const result = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
     db.media = Array.isArray(db.media) ? db.media : [];
@@ -721,6 +753,26 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
   const rows = await readImportRows(fileName, base64);
   if (!rows.length) {
     response.status(400).json({ error: "Excel file does not contain any import rows." });
+    return;
+  }
+  if (isPostgresMode) {
+    const result = await importPostgresEquipmentRows(request.auth.user, fileName, rows, {
+      projectAliases,
+      locationAliases,
+      teamAliases,
+      equipmentNameAliases,
+      equipmentTypeAliases,
+      pointNameAliases,
+      pointTypeAliases,
+      referenceAliases,
+      assigneeAliases,
+      dueAliases
+    });
+    if (!result.importedCount) {
+      response.status(400).json({ error: "Excel file does not contain any valid equipment rows. Please check the Equipment column or use the exported template." });
+      return;
+    }
+    response.json({ fileName, importedCount: result.importedCount, data: result.data });
     return;
   }
   const imported = [];

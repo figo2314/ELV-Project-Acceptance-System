@@ -8,8 +8,9 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 - [x] Add data store runtime mode and readiness checks for PostgreSQL migration.
 - [x] Add PostgreSQL auth/session/bootstrap read repositories.
 - [x] Add PostgreSQL transactions for sync, equipment, row, and point writes.
+- [x] Add PostgreSQL transactions for import, project/user admin, media uploads, and media records.
 - [ ] Replace the JSON file database runtime with PostgreSQL repositories.
-- [ ] Add PostgreSQL transactions for import, project/user admin, media uploads, and attachment uploads.
+- [ ] Add production PostgreSQL integration tests and switch production `DATA_STORE` to postgres.
 - [x] Add initial indexes for project, location, equipment, point, record status, assignee, due date, and audit log queries.
 - [x] Add optimistic locking revision fields to equipment, points, and inspection records.
 - [ ] Add a backup and restore procedure, including scheduled production backups.

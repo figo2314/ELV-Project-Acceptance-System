@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { getPrisma } from "./prisma.js";
 
 const validStatuses = new Set(["pending", "passed", "failed", "rectification", "closed"]);
+const roles = new Set(["admin", "manager", "engineer", "field"]);
+const bcryptRounds = Number(process.env.BCRYPT_ROUNDS || 12);
 
 export async function findPostgresUserByUsername(username) {
   const prisma = getPrisma();
@@ -106,13 +109,80 @@ export async function getPostgresBootstrapForUser(user) {
     points: points.map(toPoint),
     records: records.map(toRecord),
     media: media.map(toMedia),
-    users: users.map(toClientUser),
+    users: users.map(toPublicUser),
     auditLogs: auditLogs.map(toAuditLog)
   };
 }
 
 export async function upgradePostgresPasswordHash(userId, passwordHash) {
   await getPrisma().user.update({ where: { id: userId }, data: { passwordHash } });
+}
+
+export async function updatePostgresProject(user, body) {
+  const prisma = getPrisma();
+  const result = await prisma.$transaction(async (tx) => {
+    const projectId = String(body.id || "").trim();
+    const project = projectId ? await tx.project.findUnique({ where: { id: projectId } }) : null;
+    if (!project) return mutationError(404, "Project not found.");
+    if (!canAccessProject(user, projectId)) return mutationError(403, "Permission denied.");
+    await tx.project.update({
+      where: { id: projectId },
+      data: {
+        name: body.name || project.name,
+        client: body.client ?? project.client,
+        manager: body.manager ?? project.manager
+      }
+    });
+    await tx.auditLog.create({ data: auditData(user, "project.update", "project", projectId, { projectId, manager: body.manager ?? project.manager }) });
+    return { ok: true };
+  });
+  return result?.mutationError ? result : { data: await getPostgresBootstrapForUser(user) };
+}
+
+export async function upsertPostgresUser(adminUser, body) {
+  const prisma = getPrisma();
+  const result = await prisma.$transaction(async (tx) => {
+    const username = String(body.username || "").trim().toLowerCase();
+    const name = String(body.name || username || "User").trim();
+    const role = roles.has(body.role) ? body.role : "field";
+    const projectIds = await normalizeProjectIds(tx, body.projectIds);
+    if (!username) return mutationError(400, "Username is required.");
+    const existing = await tx.user.findFirst({
+      where: { OR: [{ id: String(body.id || "") }, { username }] }
+    });
+    const userId = existing?.id || createImportedId("u");
+    const passwordHash = body.password
+      ? bcrypt.hashSync(String(body.password), bcryptRounds)
+      : existing?.passwordHash || bcrypt.hashSync("changeme123", bcryptRounds);
+    await tx.user.upsert({
+      where: { id: userId },
+      create: {
+        id: userId,
+        username,
+        name,
+        role,
+        active: body.active === false || body.active === "false" ? false : true,
+        passwordHash
+      },
+      update: {
+        username,
+        name,
+        role,
+        active: body.active === false || body.active === "false" ? false : true,
+        passwordHash
+      }
+    });
+    await tx.userProjectAccess.deleteMany({ where: { userId } });
+    if (role !== "admin" && projectIds.length) {
+      await tx.userProjectAccess.createMany({
+        data: projectIds.map((projectId) => ({ userId, projectId })),
+        skipDuplicates: true
+      });
+    }
+    await tx.auditLog.create({ data: auditData(adminUser, existing ? "user.update" : "user.create", "user", userId, { role, active: body.active !== false }) });
+    return { ok: true };
+  });
+  return result?.mutationError ? result : { data: await getPostgresBootstrapForUser(adminUser) };
 }
 
 export async function syncPostgresRecords(user, incomingRecords) {
@@ -298,6 +368,108 @@ export async function upsertPostgresPoint(user, body) {
   return result?.mutationError ? result : { data: await getPostgresBootstrapForUser(user) };
 }
 
+export async function createPostgresMedia(user, body, files = []) {
+  const prisma = getPrisma();
+  const result = await prisma.$transaction(async (tx) => {
+    const equipment = await tx.equipment.findUnique({ where: { id: String(body.equipmentId || "") } });
+    if (!equipment) return mutationError(404, "Equipment not found.");
+    if (!canAccessProject(user, equipment.projectId)) return mutationError(403, "Permission denied.");
+    const comments = String(body.comments || "").trim();
+    if (!files.length && !comments) return mutationError(400, "Media file or comment is required.");
+    const mediaRecords = [];
+    if (files.length) {
+      for (const file of files) {
+        const media = await tx.mediaAsset.create({
+          data: mediaData(equipment, body, comments, {
+            create: [toMediaAttachmentCreate(file)]
+          })
+        });
+        mediaRecords.push(media);
+      }
+    } else {
+      mediaRecords.push(await tx.mediaAsset.create({ data: mediaData(equipment, body, comments) }));
+    }
+    await tx.auditLog.create({ data: auditData(user, files.length ? "media.upload" : "media.create", "equipment", equipment.id, { projectId: equipment.projectId, files: files.length, category: body.category }) });
+    return { ok: true, count: mediaRecords.length };
+  });
+  return result?.mutationError ? result : { data: await getPostgresBootstrapForUser(user) };
+}
+
+export async function importPostgresEquipmentRows(user, fileName, rows, aliases) {
+  const prisma = getPrisma();
+  const importedIds = new Set();
+  const result = await prisma.$transaction(async (tx) => {
+    for (const row of rows) {
+      const name = pickAlias(row, aliases.equipmentNameAliases);
+      if (!name) continue;
+      const projectName = pickAlias(row, aliases.projectAliases) || "Default Project";
+      const locationName = pickAlias(row, aliases.locationAliases) || "Unassigned";
+      const team = pickAlias(row, aliases.teamAliases) || "BMS";
+      const type = pickAlias(row, aliases.equipmentTypeAliases) || "Equipment";
+      const pointName = pickAlias(row, aliases.pointNameAliases);
+      const pointType = pickAlias(row, aliases.pointTypeAliases) || "Point";
+      const reference = pickAlias(row, aliases.referenceAliases) || "";
+      const assignee = pickAlias(row, aliases.assigneeAliases) || "";
+      const due = pickAlias(row, aliases.dueAliases) || "";
+
+      const project = await upsertProjectByName(tx, projectName);
+      if (!canAccessProject(user, project.id)) continue;
+      const location = await upsertLocationByName(tx, project.id, locationName);
+      const equipment = await upsertEquipmentByName(tx, { project, location, team, name, type });
+      importedIds.add(equipment.id);
+
+      if (pointName) {
+        const point = await upsertPointByName(tx, equipment.id, pointName, pointType, reference);
+        const existingRecord = await tx.inspectionRecord.findFirst({ where: { pointId: point.id } });
+        const status = point.status || existingRecord?.status || "pending";
+        if (existingRecord) {
+          await tx.inspectionRecord.update({
+            where: { id: existingRecord.id },
+            data: {
+              projectId: project.id,
+              locationId: location.id,
+              team,
+              equipmentId: equipment.id,
+              pointId: point.id,
+              title: `${name} - ${pointName}`,
+              status,
+              result: resultFromStatus(status),
+              assignee: assignee || existingRecord.assignee,
+              due: parseDateOnly(due) || existingRecord.due,
+              syncState: "synced",
+              serverUpdatedAt: new Date(),
+              revision: { increment: 1 }
+            }
+          });
+        } else {
+          await tx.inspectionRecord.create({
+            data: {
+              id: createImportedId("r"),
+              projectId: project.id,
+              locationId: location.id,
+              team,
+              equipmentId: equipment.id,
+              pointId: point.id,
+              title: `${name} - ${pointName}`,
+              status,
+              result: resultFromStatus(status),
+              assignee: assignee || null,
+              due: parseDateOnly(due),
+              syncState: "synced",
+              serverUpdatedAt: new Date()
+            }
+          });
+        }
+        await refreshPostgresPointStatus(tx, point.id);
+        await refreshPostgresEquipmentStatus(tx, equipment.id);
+      }
+    }
+    await tx.auditLog.create({ data: auditData(user, "equipment.import", "import", fileName, { importedCount: importedIds.size }) });
+    return { importedCount: importedIds.size };
+  }, { timeout: 60_000 });
+  return { importedCount: result.importedCount, data: await getPostgresBootstrapForUser(user) };
+}
+
 function toClientUser(user) {
   if (!user) return null;
   return {
@@ -309,6 +481,13 @@ function toClientUser(user) {
     passwordHash: user.passwordHash,
     projectIds: Array.isArray(user.projectAccess) ? user.projectAccess.map((item) => item.projectId) : []
   };
+}
+
+function toPublicUser(user) {
+  const item = toClientUser(user);
+  if (!item) return null;
+  const { passwordHash, ...publicUser } = item;
+  return publicUser;
 }
 
 function toProject(project) {
@@ -459,6 +638,121 @@ function toRecordData(record) {
     clientUpdatedAt: parseDateTime(record.updatedAt),
     serverUpdatedAt: new Date()
   };
+}
+
+async function normalizeProjectIds(tx, projectIdsValue) {
+  const rawIds = Array.isArray(projectIdsValue)
+    ? projectIdsValue
+    : String(projectIdsValue || "").split(",");
+  const ids = rawIds.map((id) => String(id).trim()).filter(Boolean);
+  if (!ids.length) return [];
+  const projects = await tx.project.findMany({ where: { id: { in: ids } }, select: { id: true } });
+  return projects.map((project) => project.id);
+}
+
+function mediaData(equipment, body, comments, attachments) {
+  return {
+    id: createImportedId("m"),
+    equipmentId: equipment.id,
+    projectId: equipment.projectId,
+    locationId: equipment.locationId,
+    category: String(body.category || "document").trim() || "document",
+    title: body.title || null,
+    reference: body.reference || null,
+    comments: comments || null,
+    attachments
+  };
+}
+
+function toMediaAttachmentCreate(file) {
+  return {
+    id: file.id || createImportedId("att"),
+    fileName: file.name || file.url?.split("/").pop() || "media-file",
+    mimeType: file.type || null,
+    size: Number(file.size || 0) || null,
+    storagePath: file.url || "",
+    source: "media",
+    createdAt: parseDateTime(file.uploadedAt) || new Date()
+  };
+}
+
+function pickAlias(row, names) {
+  for (const name of names) {
+    const value = row[name];
+    if (value !== undefined && String(value).trim()) return String(value).trim();
+  }
+  return "";
+}
+
+async function upsertProjectByName(tx, name) {
+  const existing = await tx.project.findFirst({ where: { name } });
+  if (existing) return existing;
+  return tx.project.create({ data: { id: createImportedId("p"), name, client: "" } });
+}
+
+async function upsertLocationByName(tx, projectId, name) {
+  const existing = await tx.location.findFirst({ where: { projectId, name } });
+  if (existing) return existing;
+  return tx.location.create({
+    data: {
+      id: createImportedId("l"),
+      projectId,
+      name,
+      path: name,
+      type: "area"
+    }
+  });
+}
+
+async function upsertEquipmentByName(tx, { project, location, team, name, type }) {
+  const existing = await tx.equipment.findFirst({ where: { locationId: location.id, name } });
+  if (existing) {
+    return tx.equipment.update({
+      where: { id: existing.id },
+      data: {
+        projectId: project.id,
+        locationId: location.id,
+        team,
+        type,
+        revision: { increment: 1 }
+      }
+    });
+  }
+  return tx.equipment.create({
+    data: {
+      id: createImportedId("e"),
+      projectId: project.id,
+      locationId: location.id,
+      team,
+      name,
+      type,
+      status: "pending"
+    }
+  });
+}
+
+async function upsertPointByName(tx, equipmentId, name, type, reference) {
+  const existing = await tx.point.findFirst({ where: { equipmentId, name: { equals: name, mode: "insensitive" } } });
+  if (existing) {
+    return tx.point.update({
+      where: { id: existing.id },
+      data: {
+        type,
+        reference,
+        revision: { increment: 1 }
+      }
+    });
+  }
+  return tx.point.create({
+    data: {
+      id: createImportedId("pt"),
+      equipmentId,
+      name,
+      type,
+      reference,
+      status: "pending"
+    }
+  });
 }
 
 async function refreshPostgresPointStatus(tx, pointId) {
