@@ -1685,7 +1685,9 @@ function renderImportPage() {
 function renderImportPreview(preview) {
   return `
     <div class="validation-grid">
-      ${renderValidationCard(t("previewRows"), preview.rows.length)}
+      ${renderValidationCard(t("previewRows"), preview.summary?.rows ?? preview.rows.length)}
+      ${renderValidationCard(t("equipmentQty"), preview.summary?.equipment ?? 0)}
+      ${renderValidationCard(t("pointCount"), preview.summary?.points ?? 0)}
       ${renderValidationCard(t("validationErrors"), preview.errors.length, preview.errors.length ? "danger" : "")}
       ${renderValidationCard(t("validationWarnings"), preview.warnings.length, preview.warnings.length ? "warn" : "")}
     </div>
@@ -3222,13 +3224,14 @@ function mergeLocalPendingRecords(serverData, pendingRecords, conflicts = []) {
 async function validateExcelFile(file) {
   if (!file) return;
   try {
-    const rows = await readExcelRows(file);
-    const preview = validateImportRows(rows);
+    const base64 = await fileToBase64(file);
+    const preview = await apiPost("/import/equipment/preview", { fileName: file.name, base64 });
     preview.fileName = file.name;
-    preview.base64 = await fileToBase64(file);
+    preview.base64 = base64;
     setState({ importPreview: preview });
-  } catch {
-    flash("Unable to read Excel file");
+  } catch (error) {
+    console.warn("Import preview failed.", error);
+    flash(error.message || "Unable to read Excel file");
   }
 }
 
@@ -3236,7 +3239,7 @@ async function commitValidatedImport() {
   const preview = state.importPreview;
   if (!preview || preview.errors.length) return;
   try {
-    const response = await apiPost("/import/equipment", { fileName: preview.fileName, base64: preview.base64 });
+    const response = await apiPost("/import/equipment", { fileName: preview.fileName, base64: preview.base64, previewToken: preview.previewToken });
     setData(response.data);
     setState({ importPreview: null });
     flash(`${t("importSuccess")}: ${response.importedCount}`);

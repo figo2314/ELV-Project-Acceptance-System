@@ -82,12 +82,31 @@ async function main() {
     "Project,Location,Team,Equipment,Type,Point,Point Type,Reference,Assignee,Due",
     "Smoke Import Project,Smoke Tower / 1F / Plant Room,BMS,SMOKE-DDC-01,DDC Panel,Smoke AI Point,Analog Input,20-25 C,QA,2026-06-30"
   ].join("\n");
-  const imported = await apiPost("/import/equipment", {
+  const importPayload = {
     fileName: "smoke.csv",
     base64: Buffer.from(csv, "utf8").toString("base64")
+  };
+  const preview = await apiPost("/import/equipment/preview", importPayload, token);
+  assert(preview.previewToken, "Import preview did not return a preview token.");
+  assert(preview.errors.length === 0, "Import preview returned unexpected errors.");
+  await apiFetch("/import/equipment", { method: "POST", body: importPayload, token, expectedStatus: 409 });
+  const imported = await apiPost("/import/equipment", {
+    ...importPayload,
+    previewToken: preview.previewToken
   }, token);
   assert(imported.importedCount >= 1, "Import did not create equipment.");
   assert(imported.data.projects.some((project) => project.name === "Smoke Import Project"), "Imported project missing from bootstrap.");
+
+  const duplicateCsv = [
+    "Project,Location,Team,Equipment,Type,Point,Point Type,Reference,Assignee,Due",
+    "Smoke Import Project,Smoke Tower / 1F / Plant Room,BMS,SMOKE-DDC-02,DDC Panel,Smoke Duplicate Point,Analog Input,20-25 C,QA,2026-06-30",
+    "Smoke Import Project,Smoke Tower / 1F / Plant Room,BMS,SMOKE-DDC-02,DDC Panel,Smoke Duplicate Point,Analog Input,20-25 C,QA,2026-06-30"
+  ].join("\n");
+  const duplicatePreview = await apiPost("/import/equipment/preview", {
+    fileName: "duplicate.csv",
+    base64: Buffer.from(duplicateCsv, "utf8").toString("base64")
+  }, token);
+  assert(duplicatePreview.errors.some((error) => error.includes("Duplicate point")), "Import preview did not detect duplicate points.");
 
   const failedLogin = await apiFetch("/auth/login", {
     method: "POST",

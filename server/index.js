@@ -96,6 +96,7 @@ const pointTypeAliases = ["Point Type", "Signal Type", "點位類型", "点位�
 const referenceAliases = ["Reference", "Expected", "參考值", "参考值", "標準", "标准"];
 const assigneeAliases = ["Assignee", "Owner", "負責人", "负责人"];
 const dueAliases = ["Due", "Target Date", "目標日期", "目标日期"];
+const knownEquipmentTypes = ["DDC Panel", "Temperature Sensor", "Air Handling Unit", "Lighting Panel", "Power Meter", "Controller", "Sensor", "Actuator", "Valve", "Meter", "Equipment"];
 
 const app = express();
 const allowedUploadTypes = new Map([
@@ -1036,8 +1037,21 @@ app.post("/api/admin/point", requireAuth(["admin", "manager", "engineer", "field
   response.json(filterDbForUser(result, request.auth.user));
 });
 
-app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(async (request, response) => {
+app.post("/api/import/equipment/preview", requireAuth(["admin", "manager"]), asyncRoute(async (request, response) => {
   const { fileName = "equipment.xlsx", base64 } = request.body;
+  if (!base64) {
+    metrics.importFailures += 1;
+    response.status(400).json({ error: "Missing base64 Excel payload." });
+    return;
+  }
+  const rows = await readImportRows(fileName, base64);
+  const preview = buildImportPreview(rows, base64);
+  await appendExistingImportWarnings(preview, request.auth.user);
+  response.json({ fileName, ...preview });
+}));
+
+app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(async (request, response) => {
+  const { fileName = "equipment.xlsx", base64, previewToken = "" } = request.body;
   if (!base64) {
     metrics.importFailures += 1;
     response.status(400).json({ error: "Missing base64 Excel payload." });
@@ -1050,8 +1064,21 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
     response.status(400).json({ error: "Excel file does not contain any import rows." });
     return;
   }
+  const preview = buildImportPreview(rows, base64);
+  await appendExistingImportWarnings(preview, request.auth.user);
+  if (preview.errors.length) {
+    metrics.importFailures += 1;
+    response.status(400).json({ error: "Import preview has validation errors. Please fix the file before importing.", preview });
+    return;
+  }
+  if (!previewToken || previewToken !== preview.previewToken) {
+    metrics.importFailures += 1;
+    response.status(409).json({ error: "Import preview is required before committing this file.", preview });
+    return;
+  }
+  const normalizedRows = preview.rows;
   if (isPostgresMode) {
-    const result = await importPostgresEquipmentRows(request.auth.user, fileName, rows, {
+    const result = await importPostgresEquipmentRows(request.auth.user, fileName, normalizedRows, {
       projectAliases,
       locationAliases,
       teamAliases,
@@ -1075,7 +1102,7 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
 
   const db = await withDbMutation(async (db) => {
     const user = getFreshUser(db, request.auth.user);
-    for (const row of rows) {
+    for (const row of normalizedRows) {
       const name = pick(row, equipmentNameAliases);
       if (!name) continue;
       const projectName = pick(row, projectAliases) || db.projects[0]?.name || "Default Project";
@@ -1784,6 +1811,102 @@ async function readImportRows(fileName, base64) {
     error.status = 400;
     throw error;
   }
+}
+
+function buildImportPreview(rows, base64 = "") {
+  const normalizedRows = rows.map(normalizeImportRowForServer).filter((row) => row.Project || row.Location || row.Equipment || row.Point);
+  const errors = [];
+  const warnings = [];
+  const required = ["Project", "Location", "Equipment", "Point"];
+  const seen = new Map();
+  normalizedRows.forEach((row, index) => {
+    const rowNo = index + 2;
+    for (const column of required) {
+      if (!row[column]) errors.push(`Missing required column ${column} @ row ${rowNo}`);
+    }
+    const key = importPointKey(row);
+    if (key !== "|||") {
+      if (seen.has(key)) {
+        errors.push(`Duplicate point @ rows ${seen.get(key)} and ${rowNo}: ${row.Equipment} / ${row.Point}`);
+      } else {
+        seen.set(key, rowNo);
+      }
+    }
+    if (row.Type && !knownEquipmentTypes.some((type) => type.toLowerCase() === row.Type.toLowerCase())) {
+      warnings.push(`Unknown equipment type @ row ${rowNo}: ${row.Type}`);
+    }
+  });
+  return {
+    rows: normalizedRows,
+    errors,
+    warnings,
+    summary: {
+      rows: normalizedRows.length,
+      equipment: new Set(normalizedRows.map((row) => `${row.Project}|${row.Location}|${row.Equipment}`).filter(Boolean)).size,
+      points: new Set(normalizedRows.map(importPointKey).filter((key) => key !== "|||")).size
+    },
+    previewToken: createImportPreviewToken(normalizedRows, base64)
+  };
+}
+
+function normalizeImportRowForServer(row) {
+  return {
+    Project: pick(row, projectAliases),
+    Location: pick(row, locationAliases),
+    Team: pick(row, teamAliases),
+    Equipment: pick(row, equipmentNameAliases),
+    Type: pick(row, equipmentTypeAliases),
+    Point: pick(row, pointNameAliases),
+    "Point Type": pick(row, pointTypeAliases),
+    Reference: pick(row, referenceAliases),
+    Assignee: pick(row, assigneeAliases),
+    Due: pick(row, dueAliases)
+  };
+}
+
+function importPointKey(row) {
+  return [row.Project, row.Location, row.Equipment, row.Point].map((value) => String(value || "").trim().toLowerCase()).join("|");
+}
+
+function createImportPreviewToken(rows, base64) {
+  return createHash("sha256")
+    .update(JSON.stringify(rows))
+    .update("|")
+    .update(String(base64 || "").slice(0, 256))
+    .digest("hex");
+}
+
+async function appendExistingImportWarnings(preview, user) {
+  const existingKeys = isPostgresMode ? await getPostgresImportKeys(user) : getJsonImportKeys(await readDb(), user);
+  const seenWarnings = new Set();
+  preview.rows.forEach((row, index) => {
+    const key = importPointKey(row);
+    if (!existingKeys.has(key) || seenWarnings.has(key)) return;
+    seenWarnings.add(key);
+    preview.warnings.push(`Existing point will be updated @ row ${index + 2}: ${row.Equipment} / ${row.Point}`);
+  });
+}
+
+async function getPostgresImportKeys(user) {
+  const projectWhere = user?.role === "admin" ? {} : { id: { in: user?.projectIds || [] } };
+  const equipment = await getPrisma().equipment.findMany({
+    where: { project: projectWhere },
+    include: { project: true, location: true, points: true }
+  });
+  return new Set(equipment.flatMap((item) => item.points.map((point) => [item.project.name, item.location.name, item.name, point.name].map((value) => String(value || "").trim().toLowerCase()).join("|"))));
+}
+
+function getJsonImportKeys(db, user) {
+  const equipmentById = new Map((db.equipment || []).map((item) => [item.id, item]));
+  const projectById = new Map((db.projects || []).map((item) => [item.id, item]));
+  const locationById = new Map((db.locations || []).map((item) => [item.id, item]));
+  const keys = new Set();
+  for (const point of db.points || []) {
+    const equipment = equipmentById.get(point.equipmentId);
+    if (!equipment || !canAccessProject(user, equipment.projectId)) continue;
+    keys.add([projectById.get(equipment.projectId)?.name, locationById.get(equipment.locationId)?.name, equipment.name, point.name].map((value) => String(value || "").trim().toLowerCase()).join("|"));
+  }
+  return keys;
 }
 
 function worksheetToRows(worksheet) {

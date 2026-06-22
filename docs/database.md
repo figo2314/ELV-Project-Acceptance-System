@@ -56,6 +56,15 @@ Upload hardening controls:
 - `UPLOAD_ORPHAN_GRACE_HOURS` controls how old an unreferenced file must be before cleanup can remove it.
 - `POST /api/admin/storage/cleanup` is admin-only. Pass `{ "dryRun": true }` to preview orphan cleanup, or omit it to delete old orphan/temp files.
 
+## Excel Import Flow
+
+Equipment imports use a two-step server validation flow:
+
+1. `POST /api/import/equipment/preview` reads `.xlsx` or `.csv`, normalizes supported column aliases, checks required fields, detects duplicate points inside the file, warns about unknown equipment types, and returns a `previewToken`.
+2. `POST /api/import/equipment` must include the same file payload and `previewToken`. The server recomputes the preview before writing, so clients cannot bypass validation by skipping the preview step.
+
+Duplicate points within the uploaded file are blocking errors. Existing points already in the database are warnings because imports can intentionally update point metadata.
+
 Health endpoints:
 
 - `/api/health` confirms the API process is alive and reports the configured data store.
