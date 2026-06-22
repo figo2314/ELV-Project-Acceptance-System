@@ -1,0 +1,87 @@
+name: PostgreSQL Runtime
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  postgres-runtime:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: elv_acceptance
+          POSTGRES_USER: elv_acceptance
+          POSTGRES_PASSWORD: elv_acceptance_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U elv_acceptance -d elv_acceptance"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      API_PORT: 4177
+      DATA_STORE: postgres
+      DATABASE_URL: postgresql://elv_acceptance:elv_acceptance_dev@127.0.0.1:5432/elv_acceptance?schema=public
+      CORS_ORIGINS: http://127.0.0.1:4173,http://localhost:4173
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Static checks
+        run: |
+          node --check server/index.js
+          node --check server/postgresRepository.js
+          node --check server/prisma.js
+          node --check server/config.js
+          node --check scripts/import-json-to-postgres.mjs
+          node --check scripts/smoke-postgres-api.mjs
+          npm audit
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Seed PostgreSQL from JSON
+        run: npm run db:seed:json data/seed.json
+
+      - name: Start API
+        run: |
+          npm run api > api-out.log 2> api-err.log &
+          echo $! > api.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4177/api/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat api-out.log
+          cat api-err.log
+          exit 1
+
+      - name: Smoke test PostgreSQL API
+        run: node scripts/smoke-postgres-api.mjs
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f api.pid ]; then
+            kill "$(cat api.pid)" || true
+          fi

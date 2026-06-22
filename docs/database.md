@@ -28,6 +28,18 @@ npm run db:migrate
 npm run db:seed:json
 ```
 
+5. Start the API in PostgreSQL mode:
+
+```bash
+DATA_STORE=postgres npm run api
+```
+
+6. Run the PostgreSQL smoke test:
+
+```bash
+npm run smoke:postgres
+```
+
 ## Runtime Mode
 
 The current API defaults to `DATA_STORE=json` so the MVP remains usable while PostgreSQL repositories are migrated route by route.
@@ -38,6 +50,10 @@ Health endpoints:
 
 - `/api/health` confirms the API process is alive and reports the configured data store.
 - `/api/ready` checks storage and PostgreSQL connectivity when `DATA_STORE=postgres`.
+
+## CI Coverage
+
+The GitHub Actions workflow in `.github/workflows/postgres-runtime.yml` starts a PostgreSQL service, applies Prisma migrations, imports `data/seed.json`, starts the API with `DATA_STORE=postgres`, and runs `scripts/smoke-postgres-api.mjs`.
 
 ## Design Notes
 
