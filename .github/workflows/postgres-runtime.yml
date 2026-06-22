@@ -52,6 +52,7 @@ jobs:
           node --check scripts/import-json-to-postgres.mjs
           node --check scripts/smoke-postgres-api.mjs
           node --check scripts/smoke-permissions.mjs
+          node --check scripts/load-test.mjs
           npm audit
 
       - name: Build frontend

@@ -18,7 +18,8 @@
     "backup:production": "node scripts/backup-production.mjs",
     "restore:production": "node scripts/restore-production.mjs",
     "smoke:postgres": "node scripts/smoke-postgres-api.mjs",
-    "smoke:permissions": "node scripts/smoke-permissions.mjs"
+    "smoke:permissions": "node scripts/smoke-permissions.mjs",
+    "load:production": "node scripts/load-test.mjs"
   },
   "devDependencies": {
     "prisma": "^6.19.3",
