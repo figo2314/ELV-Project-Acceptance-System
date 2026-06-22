@@ -2,7 +2,6 @@ const STORAGE_KEY = "elv-acceptance-offline-v2";
 const ATTACHMENT_DB_NAME = "elv-acceptance-attachments";
 const ATTACHMENT_STORE = "attachments";
 const MEDIA_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
-const AUTH_TOKEN_KEY = "elv-acceptance-auth-token";
 const SEARCH_DEBOUNCE_MS = 1100;
 const API_BASE =
   window.__ELV_API_BASE__ ||
@@ -341,7 +340,7 @@ init();
 
 async function init() {
   render();
-  if (state.authToken) await restoreSession();
+  await restoreSession();
   if (!state.authToken) {
     render();
     return;
@@ -390,7 +389,7 @@ function defaultState() {
     fieldAddPointOpen: false,
     importPreview: null,
     serverOnline: false,
-    authToken: localStorage.getItem(AUTH_TOKEN_KEY) || "",
+    authToken: "",
     currentUser: null,
     loginUsername: "admin",
     data: structuredClone(fallbackData)
@@ -408,8 +407,7 @@ function loadState() {
     }
     parsed.mediaUploadOpen = false;
     parsed.mediaUploadEquipmentId = "";
-    parsed.authToken = localStorage.getItem(AUTH_TOKEN_KEY) || parsed.authToken || "";
-    if (!parsed.authToken) parsed.currentUser = null;
+    parsed.authToken = parsed.currentUser ? "cookie" : "";
     return { ...defaultState(), ...parsed };
   } catch (error) {
     console.warn("Unable to load saved ELV state. Falling back to defaults.", error);
@@ -435,9 +433,8 @@ async function restoreSession() {
   try {
     const response = await apiGet("/auth/me");
     setData(response.data);
-    setState({ currentUser: response.user, serverOnline: true }, false);
+    setState({ authToken: "cookie", currentUser: response.user, serverOnline: true }, false);
   } catch {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
     setState({ authToken: "", currentUser: null, serverOnline: false }, false);
   }
 }
@@ -2427,13 +2424,13 @@ async function login(event) {
     const response = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(payload)
     });
     if (!response.ok) throw await createApiError(response, "/auth/login");
     const body = await response.json();
-    localStorage.setItem(AUTH_TOKEN_KEY, body.token);
     setState({
-      authToken: body.token,
+      authToken: "cookie",
       currentUser: body.user,
       loginUsername: payload.username || "",
       data: normalizeSelection(body.data),
@@ -2473,7 +2470,6 @@ async function logout() {
   } catch {
     // Logout should always clear the local session.
   }
-  localStorage.removeItem(AUTH_TOKEN_KEY);
   setState({ authToken: "", currentUser: null, view: "field", toast: "" });
 }
 
@@ -3400,7 +3396,7 @@ function translateComment() {
 }
 
 async function apiGet(path) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+  const response = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!response.ok) throw await createApiError(response, path);
   return response.json();
 }
@@ -3408,7 +3404,8 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(body)
   });
   if (!response.ok) throw await createApiError(response, path);
@@ -3418,15 +3415,11 @@ async function apiPost(path, body) {
 async function apiFormPost(path, formData) {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: authHeaders(),
+    credentials: "include",
     body: formData
   });
   if (!response.ok) throw await createApiError(response, path);
   return response.json();
-}
-
-function authHeaders() {
-  return state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {};
 }
 
 async function createApiError(response, path) {
@@ -3449,7 +3442,6 @@ async function createApiError(response, path) {
   error.path = path;
   error.detail = detail;
   if (response.status === 401) {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
     state = { ...state, authToken: "", currentUser: null };
     saveState();
   }

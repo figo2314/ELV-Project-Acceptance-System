@@ -7,7 +7,7 @@ async function main() {
   assert(ready.database?.connected === true, "PostgreSQL is not connected.");
 
   const adminPassword = `SmokeAdmin-${Date.now()}`;
-  const login = await apiPost("/auth/login", { username: "admin", password: "admin123" });
+  const login = await apiPost("/auth/login", { username: "admin", password: "admin123", returnToken: true });
   assert(login.token, "Login did not return a token.");
   assert(login.user?.role === "admin", "Admin login did not return admin role.");
   assert(login.data?.projects?.length, "Bootstrap data has no projects.");
@@ -79,7 +79,10 @@ async function main() {
   });
   assert(failedLogin.error, "Failed login did not return an error payload.");
 
-  const managerLogin = await apiPost("/auth/login", { username: "manager", password: "manager123" });
+  const browserStyleLogin = await apiPost("/auth/login", { username: "field", password: "field123" });
+  assert(!browserStyleLogin.token, "Browser-style login should not return a readable token.");
+
+  const managerLogin = await apiPost("/auth/login", { username: "manager", password: "manager123", returnToken: true });
   await apiFetch("/metrics", {
     method: "GET",
     token: managerLogin.token,

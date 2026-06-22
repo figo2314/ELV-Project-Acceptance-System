@@ -50,6 +50,9 @@ const bcryptRounds = Number(process.env.BCRYPT_ROUNDS || 12);
 const loginLockThreshold = Number(process.env.LOGIN_LOCK_THRESHOLD || 5);
 const loginLockDurationMs = Number(process.env.LOGIN_LOCK_DURATION_MINUTES || 15) * 60 * 1000;
 const allowDemoUsers = String(process.env.ALLOW_DEMO_USERS || (process.env.NODE_ENV === "production" ? "false" : "true")).toLowerCase() === "true";
+const sessionCookieName = process.env.SESSION_COOKIE_NAME || "elv_session";
+const sessionCookieSameSite = process.env.SESSION_COOKIE_SAMESITE || "Lax";
+const sessionCookieSecure = String(process.env.SESSION_COOKIE_SECURE || (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
 const allowedOrigins = String(
   process.env.CORS_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
 )
@@ -159,6 +162,7 @@ app.use((request, response, next) => {
   if (origin && allowedOrigins.includes(origin)) {
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Credentials", "true");
   } else if (!origin) {
     response.setHeader("Access-Control-Allow-Origin", allowedOrigins[0] || "http://127.0.0.1:5173");
   }
@@ -382,8 +386,9 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
     }
     await resetPostgresLoginFailures(user.id);
     const token = await createPostgresSession(user.id, sessionDurationMs);
+    setSessionCookie(response, token);
     await appendPostgresAuditLog(user, "login.success", "auth", user.id);
-    response.json({ token, user: publicUser(user), data: await getPostgresBootstrapForUser(user) });
+    response.json({ ...(request.body?.returnToken === true ? { token } : {}), user: publicUser(user), data: await getPostgresBootstrapForUser(user) });
     return;
   }
   const db = await readDb();
@@ -409,20 +414,23 @@ app.post("/api/auth/login", loginLimiter, asyncRoute(async (request, response) =
   }
   resetJsonLoginFailures(user);
   const token = createSession(db, user);
+  setSessionCookie(response, token);
   appendAuditLog(db, user, "login.success", "auth", user.id);
   await writeDb(db);
-  response.json({ token, user: publicUser(user), data: filterDbForUser(db, user) });
+  response.json({ ...(request.body?.returnToken === true ? { token } : {}), user: publicUser(user), data: filterDbForUser(db, user) });
 }));
 
 app.post("/api/auth/logout", requireAuth(), asyncRoute(async (request, response) => {
   if (isPostgresMode) {
     await deletePostgresSession(request.auth.token);
+    clearSessionCookie(response);
     await appendPostgresAuditLog(request.auth.user, "logout", "auth", request.auth.user.id);
     response.json({ ok: true });
     return;
   }
   const db = await readDb();
   db.sessions = (db.sessions || []).filter((session) => session.token !== request.auth.token);
+  clearSessionCookie(response);
   appendAuditLog(db, request.auth.user, "logout", "auth", request.auth.user.id);
   await writeDb(db);
   response.json({ ok: true });
@@ -1288,7 +1296,38 @@ function createTemporaryPassword() {
 
 function getBearerToken(request) {
   const header = request.headers.authorization || "";
-  return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (header.startsWith("Bearer ")) return header.slice(7).trim();
+  return getCookie(request, sessionCookieName);
+}
+
+function getCookie(request, name) {
+  const cookies = String(request.headers.cookie || "").split(";").map((item) => item.trim()).filter(Boolean);
+  for (const cookie of cookies) {
+    const index = cookie.indexOf("=");
+    if (index === -1) continue;
+    const key = decodeURIComponent(cookie.slice(0, index));
+    if (key === name) return decodeURIComponent(cookie.slice(index + 1));
+  }
+  return "";
+}
+
+function setSessionCookie(response, token) {
+  response.cookie(sessionCookieName, token, {
+    httpOnly: true,
+    sameSite: sessionCookieSameSite,
+    secure: sessionCookieSecure,
+    maxAge: sessionDurationMs,
+    path: "/"
+  });
+}
+
+function clearSessionCookie(response) {
+  response.clearCookie(sessionCookieName, {
+    httpOnly: true,
+    sameSite: sessionCookieSameSite,
+    secure: sessionCookieSecure,
+    path: "/"
+  });
 }
 
 function getUserFromRequest(request, db) {
