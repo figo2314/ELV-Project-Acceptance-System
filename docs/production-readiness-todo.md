@@ -4,10 +4,11 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 
 ## P0 - Data Layer And Concurrency
 
-- [ ] Replace the JSON file database with PostgreSQL using the draft schema in `docs/postgres-schema.sql`.
+- [x] Add PostgreSQL/Prisma schema, initial migration, local Docker database, and JSON import script.
+- [ ] Replace the JSON file database runtime with PostgreSQL repositories.
 - [ ] Add database transactions for sync, import, point edits, media uploads, and user management.
-- [ ] Add indexes for project, location, equipment, point, record status, assignee, due date, and audit log queries.
-- [ ] Add optimistic locking or revision numbers to records, points, equipment, and media records.
+- [x] Add initial indexes for project, location, equipment, point, record status, assignee, due date, and audit log queries.
+- [x] Add optimistic locking revision fields to equipment, points, and inspection records.
 - [ ] Add a backup and restore procedure, including scheduled production backups.
 
 ## P0 - Authentication And Security
@@ -54,7 +55,7 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 
 ## P2 - Deployment
 
-- [ ] Define production environment variables in `.env.example`.
+- [x] Define production environment variables in `.env.example`.
 - [ ] Document HTTPS/reverse-proxy deployment.
 - [ ] Add CI checks for lint, build, server syntax, tests, and dependency audit.
 - [ ] Add a rollback plan for failed deployments.

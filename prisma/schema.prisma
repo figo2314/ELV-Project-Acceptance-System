@@ -1,0 +1,265 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  manager
+  engineer
+  field
+}
+
+enum LocationType {
+  project
+  building
+  floor
+  room
+  area
+}
+
+enum RecordStatus {
+  pending
+  passed
+  failed
+  rectification
+  closed
+}
+
+enum UploadSource {
+  camera
+  upload
+  media
+}
+
+model Project {
+  id         String              @id
+  name       String
+  client     String?
+  manager    String?
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  locations  Location[]
+  equipment  Equipment[]
+  records    InspectionRecord[]
+  media      MediaAsset[]
+  auditLogs  AuditLog[]
+  userAccess UserProjectAccess[]
+
+  @@map("projects")
+}
+
+model Location {
+  id        String             @id
+  projectId String             @map("project_id")
+  parentId  String?            @map("parent_id")
+  type      LocationType       @default(area)
+  name      String
+  path      String?
+  sortOrder Int                @default(0) @map("sort_order")
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent    Location?          @relation("LocationTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Location[]         @relation("LocationTree")
+  equipment Equipment[]
+  records   InspectionRecord[]
+  media     MediaAsset[]
+
+  @@index([projectId])
+  @@index([parentId])
+  @@index([projectId, parentId, sortOrder])
+  @@map("locations")
+}
+
+model Equipment {
+  id         String             @id
+  projectId  String             @map("project_id")
+  locationId String             @map("location_id")
+  team       String
+  name       String
+  type       String
+  status     RecordStatus       @default(pending)
+  revision   Int                @default(1)
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project    Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  location   Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  points     Point[]
+  records    InspectionRecord[]
+  media      MediaAsset[]
+
+  @@unique([locationId, name])
+  @@index([projectId, locationId])
+  @@index([status])
+  @@map("equipment")
+}
+
+model Point {
+  id          String             @id
+  equipmentId String             @map("equipment_id")
+  name        String
+  type        String
+  reference   String?
+  status      RecordStatus       @default(pending)
+  revision    Int                @default(1)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  equipment   Equipment          @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  records     InspectionRecord[]
+
+  @@unique([equipmentId, name])
+  @@index([equipmentId])
+  @@map("points")
+}
+
+model InspectionRecord {
+  id              String       @id
+  projectId       String       @map("project_id")
+  locationId      String       @map("location_id")
+  equipmentId     String       @map("equipment_id")
+  pointId         String?      @map("point_id")
+  team            String
+  title           String
+  result          String       @default("Pending")
+  status          RecordStatus @default(pending)
+  comments        String?
+  assignee        String?
+  due             DateTime?    @db.Date
+  syncState       String       @default("synced") @map("sync_state")
+  revision        Int          @default(1)
+  clientUpdatedAt DateTime?    @map("client_updated_at") @db.Timestamptz(6)
+  serverUpdatedAt DateTime     @default(now()) @map("server_updated_at") @db.Timestamptz(6)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  location        Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  equipment       Equipment    @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  point           Point?       @relation(fields: [pointId], references: [id], onDelete: SetNull)
+  attachments     Attachment[]
+
+  @@index([projectId, status])
+  @@index([equipmentId, pointId])
+  @@index([assignee])
+  @@index([due])
+  @@index([serverUpdatedAt])
+  @@map("inspection_records")
+}
+
+model Attachment {
+  id          String            @id
+  recordId    String?           @map("record_id")
+  mediaId     String?           @map("media_id")
+  fileName    String            @map("file_name")
+  mimeType    String?           @map("mime_type")
+  size        Int?
+  storagePath String            @map("storage_path")
+  source      UploadSource      @default(upload)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  record      InspectionRecord? @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  media       MediaAsset?       @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@index([recordId])
+  @@index([mediaId])
+  @@map("attachments")
+}
+
+model MediaAsset {
+  id          String       @id
+  equipmentId String       @map("equipment_id")
+  projectId   String       @map("project_id")
+  locationId  String       @map("location_id")
+  category    String       @default("document")
+  title       String?
+  reference   String?
+  comments    String?
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  location    Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  equipment   Equipment    @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+
+  @@index([projectId, equipmentId])
+  @@index([category])
+  @@map("media_assets")
+}
+
+model User {
+  id            String              @id
+  username      String              @unique
+  name          String
+  role          UserRole            @default(field)
+  active        Boolean             @default(true)
+  passwordHash  String              @map("password_hash")
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  projectAccess UserProjectAccess[]
+  sessions      Session[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model UserProjectAccess {
+  userId    String   @map("user_id")
+  projectId String   @map("project_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([userId, projectId])
+  @@index([projectId])
+  @@map("user_project_access")
+}
+
+model Session {
+  token     String   @id
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model SyncConflict {
+  id            BigInt    @id @default(autoincrement())
+  recordId      String    @map("record_id")
+  localPayload  Json      @map("local_payload")
+  serverPayload Json      @map("server_payload")
+  resolved      Boolean   @default(false)
+  resolvedBy    String?   @map("resolved_by")
+  resolvedAt    DateTime? @map("resolved_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([recordId])
+  @@index([resolved])
+  @@map("sync_conflicts")
+}
+
+model AuditLog {
+  id         String   @id
+  userId     String?  @map("user_id")
+  userName   String   @map("user_name")
+  role       String
+  action     String
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id")
+  projectId  String?  @map("project_id")
+  success    Boolean  @default(true)
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}

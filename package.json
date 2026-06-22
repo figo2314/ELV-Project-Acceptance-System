@@ -9,12 +9,19 @@
     "web": "vite --host 127.0.0.1",
     "api": "node server/index.js",
     "preview": "vite --host 127.0.0.1",
-    "build": "vite build"
+    "build": "vite build",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:dev": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed:json": "node scripts/import-json-to-postgres.mjs"
   },
   "devDependencies": {
+    "prisma": "^6.19.3",
     "vite": "^8.0.16"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "concurrently": "^10.0.3",
     "exceljs": "^4.4.0",
