@@ -105,6 +105,7 @@ const dictionary = {
     noMedia: "No drawings, photos or documents attached to this equipment",
     mediaSaved: "Media saved",
     uploadFailed: "Upload failed",
+    uploadInProgress: "Upload in progress",
     drawing: "Drawing",
     map: "Map",
     locationPlan: "Location Plan",
@@ -248,6 +249,7 @@ const dictionary = {
     noMedia: "此設備暫無圖紙、照片或文件",
     mediaSaved: "媒體已保存",
     uploadFailed: "上傳失敗",
+    uploadInProgress: "正在上傳",
     drawing: "圖紙",
     map: "地圖",
     locationPlan: "位置圖",
@@ -2250,14 +2252,24 @@ function handleEscapeKey(event) {
 }
 
 function setAdminPage(page) {
+  if (mediaUploadSaving) {
+    flash(t("uploadInProgress"));
+    return;
+  }
   pendingMediaUploadFiles = [];
   pendingMediaUploadDraft = {};
+  mediaUploadSaving = false;
   setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "", dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all", dashboardEntityId: page === "dashboard" ? state.dashboardEntityId : "" });
 }
 
 function setView(view) {
+  if (mediaUploadSaving) {
+    flash(t("uploadInProgress"));
+    return;
+  }
   pendingMediaUploadFiles = [];
   pendingMediaUploadDraft = {};
+  mediaUploadSaving = false;
   setState({ view, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "" });
 }
 
@@ -3013,15 +3025,14 @@ async function saveMedia(event) {
   try {
     mediaUploadSaving = true;
     render();
-    const uploaded = files.length ? await apiPost("/attachments", { files: await filesToDataUrls(files) }) : { files: [] };
-    const response = await apiPost("/admin/media", {
-      equipmentId,
-      category: payload.category,
-      title: payload.title,
-      reference: payload.reference,
-      comments: payload.comments,
-      files: uploaded.files || []
-    });
+    const formData = new FormData();
+    formData.append("equipmentId", equipmentId);
+    formData.append("category", payload.category || getUploadMediaCategory());
+    formData.append("title", payload.title || "");
+    formData.append("reference", payload.reference || "");
+    formData.append("comments", payload.comments || "");
+    files.forEach((file) => formData.append("files", file));
+    const response = await apiFormPost("/admin/media-upload", formData);
     setData(response);
     pendingMediaUploadFiles = [];
     pendingMediaUploadDraft = {};
@@ -3088,17 +3099,29 @@ async function apiPost(path, body) {
   return response.json();
 }
 
+async function apiFormPost(path, formData) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) throw await createApiError(response, path);
+  return response.json();
+}
+
 async function createApiError(response, path) {
   let detail = "";
   try {
-    const body = await response.json();
-    detail = body.error || body.message || "";
-  } catch {
-    try {
-      detail = await response.text();
-    } catch {
-      detail = "";
+    const text = await response.text();
+    if (text) {
+      try {
+        const body = JSON.parse(text);
+        detail = body.error || body.message || text;
+      } catch {
+        detail = text;
+      }
     }
+  } catch {
+    detail = detail || "";
   }
   const error = new Error(detail || `API failed: ${response.status}`);
   error.status = response.status;
@@ -3461,12 +3484,13 @@ async function hydrateLocalAttachmentImages() {
 }
 
 async function storeInspectionAttachments(files) {
-  const dataFiles = await filesToDataUrls(files);
-  if (!dataFiles.length) return [];
+  const fileList = [...files];
+  if (!fileList.length) return [];
   try {
-    const response = await apiPost("/attachments", { files: dataFiles });
+    const response = await uploadAttachmentFiles(fileList);
     return response.files || [];
   } catch {
+    const dataFiles = await filesToDataUrls(fileList);
     const localAttachments = [];
     for (const file of dataFiles) {
       const localId = createLocalAttachmentId();
@@ -3494,7 +3518,7 @@ async function uploadPendingLocalAttachments(records) {
 
   const localFiles = (await Promise.all(localIds.map(getLocalAttachment))).filter(Boolean);
   if (!localFiles.length) return { records, uploadedLocalIds: [] };
-  const response = await apiPost("/attachments", { files: localFiles });
+  const response = await uploadAttachmentFiles(localFiles);
   const uploaded = response.files || [];
   const replacements = new Map();
   uploaded.forEach((file, index) => {
@@ -3508,6 +3532,28 @@ async function uploadPendingLocalAttachments(records) {
     })),
     uploadedLocalIds: [...replacements.keys()]
   };
+}
+
+async function uploadAttachmentFiles(files) {
+  const formData = new FormData();
+  for (const file of files) {
+    const uploadFile = file instanceof File || file instanceof Blob
+      ? file
+      : dataUrlToFile(file.dataUrl, file.name || "attachment", file.type || "application/octet-stream");
+    formData.append("files", uploadFile, file.name || "attachment");
+  }
+  return apiFormPost("/attachments", formData);
+}
+
+function dataUrlToFile(dataUrl, name, type) {
+  const [header = "", body = ""] = String(dataUrl || "").split(",");
+  const mime = header.match(/^data:([^;]+);base64$/)?.[1] || type || "application/octet-stream";
+  const binary = atob(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], name, { type: mime });
 }
 
 function filesToDataUrls(files) {

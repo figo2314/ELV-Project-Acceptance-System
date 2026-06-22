@@ -1,17 +1,23 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import multer from "multer";
 import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const dataDir = path.join(rootDir, "data");
 const dbPath = path.join(dataDir, "db.json");
+const seedDbPath = path.join(dataDir, "seed.json");
 const uploadDir = path.join(dataDir, "uploads");
 const port = Number(process.env.API_PORT || 4177);
+const jsonLimit = process.env.API_JSON_LIMIT || "25mb";
+const maxUploadFiles = 12;
+const maxUploadFileBytes = 50 * 1024 * 1024;
+const maxUploadTotalBytes = 100 * 1024 * 1024;
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
 
@@ -27,6 +33,30 @@ const assigneeAliases = ["Assignee", "Owner", "負責人", "负责人"];
 const dueAliases = ["Due", "Target Date", "目標日期", "目标日期"];
 
 const app = express();
+const allowedUploadTypes = new Map([
+  ["image/jpeg", [".jpg", ".jpeg"]],
+  ["image/png", [".png"]],
+  ["image/webp", [".webp"]],
+  ["image/gif", [".gif"]],
+  ["image/svg+xml", [".svg"]],
+  ["application/pdf", [".pdf"]],
+  ["application/acad", [".dwg"]],
+  ["application/x-acad", [".dwg"]],
+  ["application/dwg", [".dwg"]],
+  ["image/vnd.dwg", [".dwg"]],
+  ["application/dxf", [".dxf"]],
+  ["image/vnd.dxf", [".dxf"]],
+  ["application/vnd.ms-excel", [".xls"]],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", [".xlsx"]],
+  ["application/msword", [".doc"]],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", [".docx"]],
+  ["text/plain", [".txt"]]
+]);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: maxUploadFileBytes, files: maxUploadFiles }
+});
+
 app.use((request, response, next) => {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -37,7 +67,7 @@ app.use((request, response, next) => {
   }
   next();
 });
-app.use(express.json({ limit: "150mb" }));
+app.use(express.json({ limit: jsonLimit }));
 app.use("/uploads", express.static(uploadDir));
 
 app.use((error, _request, response, next) => {
@@ -45,13 +75,38 @@ app.use((error, _request, response, next) => {
     next();
     return;
   }
+  sendApiError(response, error);
+});
+
+function sendApiError(response, error) {
+  if (response.headersSent) return;
   console.warn("API request rejected:", error.type || error.name || "Error", error.message);
-  if (error.type === "entity.too.large") {
+  if (error.type === "entity.too.large" || error.code === "LIMIT_FILE_SIZE") {
     response.status(413).json({ error: "Upload is too large. Please split files or compress images before uploading." });
     return;
   }
+  if (error.type === "entity.parse.failed") {
+    response.status(400).json({ error: "Invalid JSON request payload." });
+    return;
+  }
+  if (error.code === "LIMIT_FILE_COUNT") {
+    response.status(413).json({ error: `Too many files. Upload up to ${maxUploadFiles} files at a time.` });
+    return;
+  }
+  if (error.status) {
+    response.status(error.status).json({ error: error.message || "Request failed." });
+    return;
+  }
   response.status(error.status || 400).json({ error: error.message || "Invalid request payload." });
-});
+}
+
+const asyncRoute = (handler) => async (request, response) => {
+  try {
+    await handler(request, response);
+  } catch (error) {
+    sendApiError(response, error);
+  }
+};
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true, time: Date.now() });
@@ -138,24 +193,75 @@ app.post("/api/sync", async (request, response) => {
   response.json({ ...db, conflicts });
 });
 
-app.post("/api/attachments", async (request, response) => {
-  const files = Array.isArray(request.body.files) ? request.body.files : [];
+app.post("/api/attachments", upload.array("files", maxUploadFiles), asyncRoute(async (request, response) => {
+  const multipartFiles = Array.isArray(request.files) ? request.files : [];
+  const files = multipartFiles.length ? multipartFiles : Array.isArray(request.body.files) ? request.body.files : [];
   if (!files.length) {
     response.status(400).json({ error: "Missing attachment files." });
     return;
   }
 
-  try {
+  await mkdir(uploadDir, { recursive: true });
+  const totalSize = files.reduce((sum, file) => sum + Number(file.size || file.buffer?.length || 0), 0);
+  if (totalSize > maxUploadTotalBytes) {
+    response.status(413).json({ error: `Upload is too large. Upload less than ${Math.round(maxUploadTotalBytes / 1024 / 1024)} MB at a time.` });
+    return;
+  }
+  const savedFiles = [];
+  for (const file of files) {
+    savedFiles.push(file.buffer ? await saveMulterAttachment(file) : await saveAttachment(file));
+  }
+  response.status(201).json({ files: savedFiles });
+}));
+
+app.post(
+  "/api/admin/media-upload",
+  upload.array("files", maxUploadFiles),
+  asyncRoute(async (request, response) => {
+    const body = request.body || {};
+    const files = Array.isArray(request.files) ? request.files : [];
+    const totalSize = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    const comments = String(body.comments || "").trim();
+    if (!files.length && !comments) {
+      response.status(400).json({ error: "Media file or comment is required." });
+      return;
+    }
+    if (totalSize > maxUploadTotalBytes) {
+      response.status(413).json({ error: `Upload is too large. Upload less than ${Math.round(maxUploadTotalBytes / 1024 / 1024)} MB at a time.` });
+      return;
+    }
+
     await mkdir(uploadDir, { recursive: true });
     const savedFiles = [];
-    for (const file of files) {
-      savedFiles.push(await saveAttachment(file));
+    try {
+      for (const file of files) {
+        savedFiles.push(await saveMulterAttachment(file));
+      }
+
+      const result = await withDbMutation(async (db) => {
+        db.media = Array.isArray(db.media) ? db.media : [];
+        const equipment = db.equipment.find((item) => item.id === body.equipmentId);
+        if (!equipment) return mutationError(404, "Equipment not found.");
+        appendMediaRecords(db, equipment, {
+          category: body.category,
+          title: body.title,
+          reference: body.reference,
+          comments,
+          files: savedFiles
+        });
+        return db;
+      });
+      if (sendMutationError(response, result)) {
+        await deleteUploadedFiles(savedFiles);
+        return;
+      }
+      response.json(result);
+    } catch (error) {
+      await deleteUploadedFiles(savedFiles);
+      throw error;
     }
-    response.status(201).json({ files: savedFiles });
-  } catch (error) {
-    response.status(error.status || 400).json({ error: error.message || "Unable to save attachments." });
-  }
-});
+  })
+);
 
 app.post("/api/equipment", async (request, response) => {
   const result = await withDbMutation(async (db) => {
@@ -218,39 +324,8 @@ app.post("/api/admin/media", async (request, response) => {
     if (!equipment) return mutationError(404, "Equipment not found.");
     const files = Array.isArray(body.files) ? body.files : [];
     const comments = String(body.comments || "").trim();
-    const title = String(body.title || "").trim();
-    const reference = String(body.reference || "").trim();
     if (!files.length && !comments) return mutationError(400, "Media file or comment is required.");
-    const createdAt = new Date().toISOString();
-    if (files.length) {
-      for (const file of files) {
-        db.media.push({
-          id: createId("m"),
-          equipmentId: equipment.id,
-          projectId: equipment.projectId,
-          locationId: equipment.locationId,
-          category: String(body.category || "document").trim() || "document",
-          title,
-          reference,
-          comments,
-          file,
-          createdAt
-        });
-      }
-    } else {
-      db.media.push({
-        id: createId("m"),
-        equipmentId: equipment.id,
-        projectId: equipment.projectId,
-        locationId: equipment.locationId,
-        category: String(body.category || "document").trim() || "document",
-        title,
-        reference,
-        comments,
-        file: null,
-        createdAt
-      });
-    }
+    appendMediaRecords(db, equipment, { category: body.category, title: body.title, reference: body.reference, comments, files });
     return db;
   });
   if (sendMutationError(response, result)) return;
@@ -357,16 +432,24 @@ app.post("/api/admin/point", async (request, response) => {
   response.json(result);
 });
 
-app.post("/api/import/equipment", async (request, response) => {
+app.post("/api/import/equipment", asyncRoute(async (request, response) => {
   const { fileName = "equipment.xlsx", base64 } = request.body;
   if (!base64) {
     response.status(400).json({ error: "Missing base64 Excel payload." });
     return;
   }
 
-  const workbook = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer" });
+  const workbook = readImportWorkbook(base64);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) {
+    response.status(400).json({ error: "Excel file does not contain a readable worksheet." });
+    return;
+  }
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  if (!rows.length) {
+    response.status(400).json({ error: "Excel file does not contain any import rows." });
+    return;
+  }
   const imported = [];
 
   const db = await withDbMutation(async (db) => {
@@ -440,7 +523,15 @@ app.post("/api/import/equipment", async (request, response) => {
 
     return db;
   });
+  if (!imported.length) {
+    response.status(400).json({ error: "Excel file does not contain any valid equipment rows. Please check the Equipment column or use the exported template." });
+    return;
+  }
   response.json({ fileName, importedCount: imported.length, data: db });
+}));
+
+app.use((error, _request, response, _next) => {
+  sendApiError(response, error);
 });
 
 app.listen(port, () => {
@@ -451,12 +542,17 @@ async function readDb() {
   await dbWriteQueue.catch(() => {});
   await mkdir(dataDir, { recursive: true });
   if (!existsSync(dbPath)) {
-    await writeFile(dbPath, `${JSON.stringify({ version: 1, projects: [], locations: [], equipment: [], points: [], media: [], records: [] }, null, 2)}\n`);
+    const seed = existsSync(seedDbPath) ? await readFile(seedDbPath, "utf8") : `${JSON.stringify(createEmptyDb(), null, 2)}\n`;
+    await writeFile(dbPath, seed.endsWith("\n") ? seed : `${seed}\n`);
   }
   const content = await readFile(dbPath, "utf8");
   const db = JSON.parse(content.replace(/^\uFEFF/, ""));
   db.media = Array.isArray(db.media) ? db.media : [];
   return db;
+}
+
+function createEmptyDb() {
+  return { version: 1, projects: [], locations: [], equipment: [], points: [], media: [], records: [] };
 }
 
 async function writeDb(db) {
@@ -497,7 +593,8 @@ async function saveAttachment(file) {
     throw error;
   }
   const originalName = sanitizeFileName(file.name || "attachment");
-  const extension = getSafeExtension(originalName, parsed.mimeType);
+  validateUploadFile({ name: originalName, type: file.type || parsed.mimeType, size: parsed.buffer.length, mimeType: parsed.mimeType });
+  const extension = getSafeExtension(originalName, file.type || parsed.mimeType);
   const storedName = `${Date.now()}-${randomUUID()}${extension}`;
   await writeFile(path.join(uploadDir, storedName), parsed.buffer);
   return {
@@ -507,6 +604,100 @@ async function saveAttachment(file) {
     url: `/uploads/${storedName}`,
     uploadedAt: new Date().toISOString()
   };
+}
+
+async function saveMulterAttachment(file) {
+  const originalName = sanitizeFileName(file.originalname || "attachment");
+  validateUploadFile({ name: originalName, type: file.mimetype, size: file.size, mimeType: file.mimetype });
+  const extension = getSafeExtension(originalName, file.mimetype);
+  const storedName = `${Date.now()}-${randomUUID()}${extension}`;
+  await writeFile(path.join(uploadDir, storedName), file.buffer);
+  return {
+    name: originalName,
+    type: file.mimetype || "application/octet-stream",
+    size: file.size,
+    url: `/uploads/${storedName}`,
+    uploadedAt: new Date().toISOString()
+  };
+}
+
+async function deleteUploadedFiles(files) {
+  await Promise.all(
+    files
+      .map((file) => file?.url)
+      .filter((url) => typeof url === "string" && url.startsWith("/uploads/"))
+      .map((url) => rm(path.join(uploadDir, path.basename(url)), { force: true }).catch(() => {}))
+  );
+}
+
+function validateUploadFile(file) {
+  const size = Number(file.size || 0);
+  if (size > maxUploadFileBytes) {
+    const error = new Error(`File is too large. Each file must be under ${Math.round(maxUploadFileBytes / 1024 / 1024)} MB.`);
+    error.status = 413;
+    throw error;
+  }
+  const type = normalizeMimeType(file.type || file.mimeType || "");
+  const ext = path.extname(file.name || "").toLowerCase();
+  const allowedExtensions = allowedUploadTypes.get(type) || (type === "application/octet-stream" ? getAllowedExtensions() : null);
+  if (!allowedExtensions || !allowedExtensions.includes(ext)) {
+    const error = new Error(`Unsupported file type: ${file.name || type || "unknown"}.`);
+    error.status = 400;
+    throw error;
+  }
+}
+
+function appendMediaRecords(db, equipment, payload) {
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  const comments = String(payload.comments || "").trim();
+  const title = String(payload.title || "").trim();
+  const reference = String(payload.reference || "").trim();
+  const category = String(payload.category || "document").trim() || "document";
+  const createdAt = new Date().toISOString();
+  if (files.length) {
+    for (const file of files) {
+      db.media.push({
+        id: createId("m"),
+        equipmentId: equipment.id,
+        projectId: equipment.projectId,
+        locationId: equipment.locationId,
+        category,
+        title,
+        reference,
+        comments,
+        file,
+        createdAt
+      });
+    }
+    return;
+  }
+  db.media.push({
+    id: createId("m"),
+    equipmentId: equipment.id,
+    projectId: equipment.projectId,
+    locationId: equipment.locationId,
+    category,
+    title,
+    reference,
+    comments,
+    file: null,
+    createdAt
+  });
+}
+
+function readImportWorkbook(base64) {
+  try {
+    if (!/^[A-Za-z0-9+/=\s]+$/.test(String(base64 || ""))) {
+      throw new Error("Invalid base64 payload.");
+    }
+    const buffer = Buffer.from(base64, "base64");
+    if (!buffer.length) throw new Error("Empty Excel payload.");
+    return XLSX.read(buffer, { type: "buffer" });
+  } catch {
+    const error = new Error("Unable to read Excel file. Please use the exported template format.");
+    error.status = 400;
+    throw error;
+  }
 }
 
 function parseDataUrl(dataUrl) {
@@ -526,19 +717,20 @@ function sanitizeFileName(name) {
 
 function getSafeExtension(name, mimeType) {
   const ext = path.extname(name).toLowerCase();
-  if (ext && ext.length <= 10) return ext;
-  const map = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "application/pdf": ".pdf",
-    "application/vnd.ms-excel": ".xls",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "application/msword": ".doc",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx"
-  };
-  return map[mimeType] || ".bin";
+  const type = normalizeMimeType(mimeType);
+  const allowedExtensions = allowedUploadTypes.get(type) || [];
+  if (allowedExtensions.includes(ext)) return ext;
+  if (type === "application/octet-stream" && getAllowedExtensions().includes(ext)) return ext;
+  return allowedExtensions[0] || ".bin";
+}
+
+function normalizeMimeType(mimeType) {
+  const type = String(mimeType || "").toLowerCase();
+  return type;
+}
+
+function getAllowedExtensions() {
+  return [...new Set([...allowedUploadTypes.values()].flat())];
 }
 
 function validateEquipmentPayload(db, body, prefix) {
