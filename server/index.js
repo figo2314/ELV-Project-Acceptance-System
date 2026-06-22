@@ -58,7 +58,7 @@ const sessionCookieName = process.env.SESSION_COOKIE_NAME || "elv_session";
 const sessionCookieSameSite = process.env.SESSION_COOKIE_SAMESITE || "Lax";
 const sessionCookieSecure = String(process.env.SESSION_COOKIE_SECURE || (process.env.NODE_ENV === "production" ? "true" : "false")).toLowerCase() === "true";
 const allowedOrigins = String(
-  process.env.CORS_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
+  process.env.CORS_ORIGINS || "http://127.0.0.1:5188,http://localhost:5188,http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
 )
   .split(",")
   .map((item) => item.trim())

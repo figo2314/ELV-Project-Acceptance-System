@@ -28,7 +28,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Open the local URL shown by Vite, usually `http://127.0.0.1:5173/`.
+Open the local web app at `http://127.0.0.1:5188/`.
 
 The API runs at `http://127.0.0.1:4177/api`.
 

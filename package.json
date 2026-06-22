@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm:api\" \"npm:web\"",
-    "web": "vite --host 127.0.0.1",
+    "web": "vite --host 127.0.0.1 --port 5188 --strictPort",
     "api": "node server/index.js",
-    "preview": "vite --host 127.0.0.1",
+    "preview": "vite --host 127.0.0.1 --port 5188 --strictPort",
     "build": "vite build",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

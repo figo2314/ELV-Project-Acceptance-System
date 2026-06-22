@@ -6,7 +6,7 @@ const SEARCH_DEBOUNCE_MS = 1100;
 const API_BASE =
   window.__ELV_API_BASE__ ||
   import.meta.env?.VITE_API_BASE ||
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.port === "5176" || window.location.port === "5173"
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.port === "5188" || window.location.port === "5176" || window.location.port === "5173"
     ? `http://${window.location.hostname}:4177/api`
     : "/api");
 const KNOWN_EQUIPMENT_TYPES = ["DDC Panel", "Temperature Sensor", "Air Handling Unit", "Lighting Panel", "Power Meter", "Controller", "Sensor", "Actuator", "Valve", "Meter", "Equipment"];
