@@ -49,6 +49,7 @@ const allowedOrigins = String(
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);
+const accessLogEnabled = String(process.env.ACCESS_LOG || "true").toLowerCase() !== "false";
 let dbWriteQueue = Promise.resolve();
 let dbMutationQueue = Promise.resolve();
 const sessions = new Map();
@@ -120,6 +121,21 @@ const uploadLimiter = rateLimit({
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
 app.use((request, response, next) => {
+  const incomingId = String(request.headers["x-request-id"] || "").trim();
+  request.id = incomingId || randomUUID();
+  request.startedAt = Date.now();
+  response.setHeader("X-Request-Id", request.id);
+  const json = response.json.bind(response);
+  response.json = (body) => {
+    if (response.statusCode >= 400 && body && typeof body === "object" && !Array.isArray(body) && !body.requestId) {
+      return json({ ...body, requestId: request.id });
+    }
+    return json(body);
+  };
+  response.on("finish", () => logAccess(request, response));
+  next();
+});
+app.use((request, response, next) => {
   const origin = request.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
     response.setHeader("Access-Control-Allow-Origin", origin);
@@ -139,41 +155,84 @@ app.use("/api", apiLimiter);
 app.use(express.json({ limit: jsonLimit }));
 app.use("/uploads", express.static(uploadDir));
 
-app.use((error, _request, response, next) => {
+app.use((error, request, response, next) => {
   if (!error) {
     next();
     return;
   }
-  sendApiError(response, error);
+  sendApiError(response, error, request);
 });
 
-function sendApiError(response, error) {
+function sendApiError(response, error, request) {
   if (response.headersSent) return;
-  console.warn("API request rejected:", error.type || error.name || "Error", error.message);
+  logEvent("warn", "API request rejected", {
+    requestId: request?.id,
+    errorType: error.type || error.name || "Error",
+    message: error.message
+  });
   if (error.type === "entity.too.large" || error.code === "LIMIT_FILE_SIZE") {
-    response.status(413).json({ error: "Upload is too large. Please split files or compress images before uploading." });
+    response.status(413).json(errorPayload("Upload is too large. Please split files or compress images before uploading.", request));
     return;
   }
   if (error.type === "entity.parse.failed") {
-    response.status(400).json({ error: "Invalid JSON request payload." });
+    response.status(400).json(errorPayload("Invalid JSON request payload.", request));
     return;
   }
   if (error.code === "LIMIT_FILE_COUNT") {
-    response.status(413).json({ error: `Too many files. Upload up to ${maxUploadFiles} files at a time.` });
+    response.status(413).json(errorPayload(`Too many files. Upload up to ${maxUploadFiles} files at a time.`, request));
     return;
   }
   if (error.status) {
-    response.status(error.status).json({ error: error.message || "Request failed." });
+    response.status(error.status).json(errorPayload(error.message || "Request failed.", request));
     return;
   }
-  response.status(error.status || 400).json({ error: error.message || "Invalid request payload." });
+  response.status(error.status || 400).json(errorPayload(error.message || "Invalid request payload.", request));
+}
+
+function errorPayload(message, request) {
+  return { error: message, requestId: request?.id || "" };
+}
+
+function logAccess(request, response) {
+  if (!accessLogEnabled || !request.path?.startsWith("/api")) return;
+  const durationMs = Date.now() - Number(request.startedAt || Date.now());
+  logEvent(response.statusCode >= 500 ? "error" : "info", "api.request", {
+    requestId: request.id,
+    method: request.method,
+    path: request.path,
+    status: response.statusCode,
+    durationMs,
+    dataStore,
+    userId: request.auth?.user?.id || "",
+    role: request.auth?.user?.role || "",
+    ip: request.ip
+  });
+}
+
+function logEvent(level, message, details = {}) {
+  const entry = {
+    level,
+    time: new Date().toISOString(),
+    message,
+    ...details
+  };
+  const line = JSON.stringify(entry);
+  if (level === "error") {
+    console.error(line);
+    return;
+  }
+  if (level === "warn") {
+    console.warn(line);
+    return;
+  }
+  console.log(line);
 }
 
 const asyncRoute = (handler) => async (request, response) => {
   try {
     await handler(request, response);
   } catch (error) {
-    sendApiError(response, error);
+    sendApiError(response, error, request);
   }
 };
 
@@ -211,7 +270,7 @@ const requireAuth = (allowedRoles = roles) => async (request, response, next) =>
     request.auth = { token, user };
     next();
   } catch (error) {
-    sendApiError(response, error);
+    sendApiError(response, error, request);
   }
 };
 
@@ -858,12 +917,12 @@ app.post("/api/import/equipment", requireAuth(["admin", "manager"]), asyncRoute(
   response.json({ fileName, importedCount: imported.length, data: filterDbForUser(db, request.auth.user) });
 }));
 
-app.use((error, _request, response, _next) => {
-  sendApiError(response, error);
+app.use((error, request, response, _next) => {
+  sendApiError(response, error, request);
 });
 
 app.listen(port, () => {
-  console.log(`ELV acceptance API listening on http://127.0.0.1:${port} (${startupMode.dataStore} mode)`);
+  logEvent("info", "api.started", { port, dataStore: startupMode.dataStore });
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

@@ -52,7 +52,7 @@ This checklist tracks the hardening work needed before the ELV Project Acceptanc
 
 ## P1 - Observability And Operations
 
-- [ ] Add structured request logging with request IDs.
+- [x] Add structured request logging with request IDs.
 - [x] Add `/api/ready` readiness checks for database and storage.
 - [ ] Add metrics for request latency, failed logins, sync conflicts, upload failures, and import failures.
 - [ ] Add audit log pagination and export.
