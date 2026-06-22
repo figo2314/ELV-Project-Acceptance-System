@@ -1297,7 +1297,19 @@ function ensureSecurityData(db) {
   }
   if (!allowDemoUsers) return;
   for (const user of defaultUsers) {
-    if (db.users.some((item) => item.username?.toLowerCase() === user.username.toLowerCase())) continue;
+    const existing = db.users.find((item) => item.username?.toLowerCase() === user.username.toLowerCase());
+    if (existing) {
+      existing.id = existing.id || user.id;
+      existing.name = user.name;
+      existing.role = user.role;
+      existing.passwordHash = hashPassword(user.password);
+      existing.active = user.active;
+      existing.projectIds = user.projectIds;
+      existing.mustChangePassword = false;
+      existing.failedLoginCount = 0;
+      existing.lockedUntil = "";
+      continue;
+    }
     db.users.push({
       id: user.id,
       username: user.username,
@@ -1306,7 +1318,7 @@ function ensureSecurityData(db) {
       passwordHash: hashPassword(user.password),
       active: user.active,
       projectIds: user.projectIds,
-      mustChangePassword: true,
+      mustChangePassword: false,
       failedLoginCount: 0,
       lockedUntil: "",
       passwordChangedAt: "",
@@ -1544,6 +1556,12 @@ function parseAuditLogQuery(query = {}) {
     q: String(query.q || "").trim().slice(0, 120),
     format: String(query.format || "").toLowerCase() === "csv" ? "csv" : "json"
   };
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
 }
 
 function parseDateQuery(value, endOfDay) {

@@ -512,22 +512,46 @@ function render() {
 }
 
 function renderLogin() {
+  const demoAccounts = [
+    { role: "Admin", username: "admin", password: "admin123", note: "Full dashboard, data, import, people" },
+    { role: "Manager", username: "manager", password: "manager123", note: "Project management and reporting" },
+    { role: "Engineer", username: "engineer", password: "engineer123", note: "Data table, issues, media tools" },
+    { role: "Field", username: "field", password: "field123", note: "Mobile inspection workflow" }
+  ];
   return `
     <section class="login-shell">
-      <form class="login-card" data-login-form>
-        <div>
-          <p class="eyebrow">Access Control</p>
-          <h2>Sign in to ELV Acceptance</h2>
-          <span>Use your company account. Contact an administrator if this is your first login.</span>
-        </div>
-        <label>Username
-          <input name="username" value="${escapeHtml(state.loginUsername || "")}" autocomplete="username" />
-        </label>
-        <label>Password
-          <input name="password" type="password" autocomplete="current-password" />
-        </label>
-        <button class="primary" type="submit">Login</button>
-      </form>
+      <div class="login-grid">
+        <form class="login-card" data-login-form>
+          <div>
+            <p class="eyebrow">Access Control</p>
+            <h2>Sign in to ELV Acceptance</h2>
+            <span>Use a demo account below to test the field and admin workflows.</span>
+          </div>
+          <label>Username
+            <input name="username" value="${escapeHtml(state.loginUsername || "")}" autocomplete="username" />
+          </label>
+          <label>Password
+            <input name="password" type="password" autocomplete="current-password" />
+          </label>
+          <button class="primary" type="submit">Login</button>
+        </form>
+        <aside class="demo-login-card" aria-label="Demo accounts">
+          <div>
+            <p class="eyebrow">Demo Accounts</p>
+            <h3>Quick test login</h3>
+            <span>Click any account to fill the login form.</span>
+          </div>
+          <div class="demo-account-list">
+            ${demoAccounts.map((account) => `
+              <button type="button" class="demo-account" data-demo-login="${encodeURIComponent(JSON.stringify(account))}">
+                <strong>${escapeHtml(account.role)}</strong>
+                <span><b>${escapeHtml(account.username)}</b> / ${escapeHtml(account.password)}</span>
+                <small>${escapeHtml(account.note)}</small>
+              </button>
+            `).join("")}
+          </div>
+        </aside>
+      </div>
     </section>
   `;
 }
@@ -2515,6 +2539,14 @@ async function login(event) {
   }
 }
 
+function fillDemoLogin(account) {
+  const form = document.querySelector("[data-login-form]");
+  if (!form) return;
+  form.elements.username.value = account.username || "";
+  form.elements.password.value = account.password || "";
+  setState({ loginUsername: account.username || "" }, false);
+}
+
 async function changePassword(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2740,6 +2772,9 @@ function bindIssueDetailEvents() {
 
 function bindEvents() {
   document.querySelector("[data-login-form]")?.addEventListener("submit", login);
+  document.querySelectorAll("[data-demo-login]").forEach((button) => {
+    button.addEventListener("click", () => fillDemoLogin(JSON.parse(decodeURIComponent(button.dataset.demoLogin))));
+  });
   document.querySelector("[data-password-change-form]")?.addEventListener("submit", changePassword);
   document.querySelector("[data-action='logout']")?.addEventListener("click", logout);
   document.querySelectorAll("[data-view]").forEach((button) => {
