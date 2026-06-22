@@ -4,12 +4,18 @@ import {
   ATTACHMENT_STORE,
   MEDIA_UPLOAD_LIMIT_BYTES,
   SEARCH_DEBOUNCE_MS,
+  calculateExponentialBackoffDelay,
   clearPersistedState,
   clearSyncRetryState,
-  createSyncRetryState,
+  deletePendingMutation,
   getPendingSyncRecords,
   getSyncQueueCount,
+  listPendingAssets,
+  listPendingMutations,
   loadPersistedState,
+  markMutationRetry,
+  queueFormUploadMutation,
+  queuePendingMutation,
   savePersistedState
 } from "./state.js";
 
@@ -347,6 +353,7 @@ async function init() {
       saveState();
     }
   });
+  await hydratePendingMutationSummary();
   render();
   await restoreSession();
   if (!state.authToken) {
@@ -398,6 +405,8 @@ function defaultState() {
     activeConflictId: "",
     syncRetryAttempt: 0,
     syncRetryAt: 0,
+    pendingMutationCount: 0,
+    pendingMutationPreview: [],
     selectedIssueId: "",
     fieldAddPointOpen: false,
     importPreview: null,
@@ -487,6 +496,18 @@ function setState(patch, shouldRender = true) {
 
 function setData(data) {
   setState({ data: normalizeSelection(data), serverOnline: true });
+}
+
+async function hydratePendingMutationSummary(shouldRender = false) {
+  try {
+    const mutations = await listPendingMutations();
+    const preview = mutations
+      .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0))
+      .slice(0, 20);
+    setState({ pendingMutationCount: mutations.length, pendingMutationPreview: preview }, shouldRender);
+  } catch (error) {
+    console.warn("Unable to read offline mutation queue.", error);
+  }
 }
 
 function normalizeSelection(data) {
@@ -597,7 +618,7 @@ function renderPasswordChange() {
 }
 
 function renderTopbar() {
-  const pendingSync = getSyncQueueCount(state.data);
+  const pendingSync = getSyncQueueCount(state.data) + Number(state.pendingMutationCount || 0);
   const isOnline = navigator.onLine && state.serverOnline;
   const retryWait = getSyncRetryWaitSeconds();
   const syncText = pendingSync
@@ -2434,6 +2455,8 @@ function renderIssueModal() {
 function renderSyncQueueModal() {
   if (!state.syncQueueOpen) return "";
   const pending = getPendingSyncRecords(state.data);
+  const mutations = state.pendingMutationPreview || [];
+  const pendingTotal = pending.length + Number(state.pendingMutationCount || 0);
   const retryWait = getSyncRetryWaitSeconds();
   return `
     <div class="modal-backdrop">
@@ -2441,13 +2464,13 @@ function renderSyncQueueModal() {
         <div class="modal-head">
           <div>
             <p class="eyebrow">Offline Sync</p>
-            <h2>${pending.length ? `${pending.length} Pending Changes` : "Queue Clear"}</h2>
+            <h2>${pendingTotal ? `${pendingTotal} Pending Changes` : "Queue Clear"}</h2>
           </div>
           <button class="icon-btn" data-close-sync-queue title="${t("close")}">X</button>
         </div>
         <div class="modal-summary">
           <span class="badge ${navigator.onLine && state.serverOnline ? "passed" : "pending"}">${navigator.onLine && state.serverOnline ? t("online") : t("offline")}</span>
-          <strong>${pending.length ? "Waiting to upload" : t("synced")}</strong>
+          <strong>${pendingTotal ? "Waiting to upload" : t("synced")}</strong>
           <span>${retryWait ? `Retry scheduled in ${retryWait}s` : "Ready"}</span>
         </div>
         <div class="modal-block">
@@ -2457,13 +2480,36 @@ function renderSyncQueueModal() {
               ? `<div class="issue-list">${pending.map(renderSyncQueueItem).join("")}</div>`
               : `<div class="empty small">${t("synced")}</div>`
           }
+          ${
+            mutations.length
+              ? `<div class="section-title">Asset & Transaction Queue</div><div class="issue-list">${mutations.map(renderPendingMutationItem).join("")}</div>`
+              : ""
+          }
         </div>
         <div class="modal-actions">
           <button class="ghost" data-close-sync-queue>${t("close")}</button>
-          <button class="primary" data-retry-sync ${pending.length ? "" : "disabled"}>Retry Now</button>
+          <button class="primary" data-retry-sync ${pendingTotal ? "" : "disabled"}>Retry Now</button>
         </div>
       </section>
     </div>
+  `;
+}
+
+function renderPendingMutationItem(mutation) {
+  const equipment = state.data.equipment.find((item) => item.id === mutation.equipmentId);
+  const retryWait = mutation.retryAt ? Math.max(0, Math.ceil((mutation.retryAt - Date.now()) / 1000)) : 0;
+  return `
+    <article class="issue-card pending">
+      <div>
+        <span class="badge pending">${escapeHtml(mutation.type || "mutation")}</span>
+        <h3>${escapeHtml(equipment?.name || mutation.equipmentId || mutation.endpoint || "Queued upload")}</h3>
+        <p>${escapeHtml((mutation.assetIds || []).length ? `${mutation.assetIds.length} asset(s)` : "Data mutation")}</p>
+      </div>
+      <div class="issue-card-meta">
+        <span>Retry: <strong>${retryWait ? `${retryWait}s` : "ready"}</strong></span>
+        <span>Error: <strong>${escapeHtml(mutation.lastError || "-")}</strong></span>
+      </div>
+    </article>
   `;
 }
 
@@ -2490,13 +2536,20 @@ function renderSyncQueueItem(record) {
 function renderConflictModal() {
   const conflict = getActiveConflict();
   if (!conflict) return "";
-  return showConflictModal(conflict.local, conflict.server, conflict);
+  return renderGranularConflictModal(conflict);
 }
 
 function showConflictModal(localData, serverData, conflict = {}) {
+  return renderGranularConflictModal({ local: localData, server: serverData, ...conflict });
+}
+
+function renderGranularConflictModal(conflict = {}) {
+  const localData = conflict.local || {};
+  const serverData = conflict.server || {};
   const point = state.data.points.find((item) => item.id === localData?.pointId) || state.data.points.find((item) => item.id === serverData?.pointId);
   const equipment = state.data.equipment.find((item) => item.id === localData?.equipmentId) || state.data.equipment.find((item) => item.id === serverData?.equipmentId);
   const title = point?.name || localData?.title || serverData?.title || "Sync conflict";
+  const fields = getConflictFields(localData, serverData);
   return `
     <div class="modal-backdrop">
       <section class="modal" role="dialog" aria-modal="true" aria-label="Resolve sync conflict" data-conflict-modal>
@@ -2510,18 +2563,42 @@ function showConflictModal(localData, serverData, conflict = {}) {
         <div class="modal-summary">
           <span class="badge failed">409</span>
           <strong>${escapeHtml(equipment?.name || "-")}</strong>
-          <span>${escapeHtml(conflict.error || "Server data changed before your offline update was synced.")}</span>
+          <span>${escapeHtml(conflict.error || "Pick the exact fields to keep from your local offline edit.")}</span>
         </div>
-        <div class="modal-grid">
-          ${renderConflictChoice("local", "Use My Local Changes", localData)}
-          ${renderConflictChoice("server", "Keep Server Data", serverData)}
+        <div class="modal-block">
+          <div class="section-title">Field-Level Merge Matrix</div>
+          <div class="data-table compact conflict-merge-table">
+            <div class="table-head" style="grid-template-columns: 140px minmax(180px, 1fr) minmax(180px, 1fr) 120px;">
+              <div>Field</div>
+              <div>Local</div>
+              <div>Server</div>
+              <div>Use Local</div>
+            </div>
+            ${fields.map(renderConflictFieldRow).join("")}
+          </div>
         </div>
         <div class="modal-actions">
           <button class="ghost" data-close-conflict>${t("close")}</button>
-          <button class="primary" data-resolve-conflict="local">Use My Local Changes</button>
           <button class="ghost" data-resolve-conflict="server">Keep Server Data</button>
+          <button class="primary" data-merge-conflict>Merge Commit</button>
         </div>
       </section>
+    </div>
+  `;
+}
+
+function renderConflictFieldRow(field) {
+  return `
+    <div class="table-row" style="grid-template-columns: 140px minmax(180px, 1fr) minmax(180px, 1fr) 120px;">
+      <div><strong>${escapeHtml(field.label)}</strong></div>
+      <div>${escapeHtml(formatConflictValue(field.localValue))}</div>
+      <div>${escapeHtml(formatConflictValue(field.serverValue))}</div>
+      <div>
+        <label class="checkbox-line">
+          <input type="checkbox" data-merge-field="${escapeHtml(field.key)}" ${field.defaultLocal ? "checked" : ""} />
+          <span>Local</span>
+        </label>
+      </div>
     </div>
   `;
 }
@@ -2917,6 +2994,7 @@ function bindEvents() {
   document.querySelectorAll("[data-resolve-conflict]").forEach((button) => {
     button.addEventListener("click", () => resolveActiveConflict(button.dataset.resolveConflict));
   });
+  document.querySelector("[data-merge-conflict]")?.addEventListener("click", commitGranularConflictMerge);
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
@@ -3423,12 +3501,23 @@ function updateRecord(recordId, patch) {
   });
   const data = refreshLocalStatuses({ ...state.data, records });
   setState({ data, selectedRecordId: recordId, toast: t("success") });
+  const updatedRecord = records.find((record) => record.id === recordId);
+  if (updatedRecord) {
+    queuePendingMutation({
+      type: "record.update",
+      endpoint: "/sync",
+      payload: updatedRecord,
+      recordId,
+      equipmentId: updatedRecord.equipmentId
+    }).then(() => hydratePendingMutationSummary(false)).catch((error) => console.warn("Unable to queue structural mutation.", error));
+  }
   window.setTimeout(() => setState({ toast: "" }), 1600);
   return true;
 }
 
 async function syncRecords(showToast, options = {}) {
   if (!state.authToken) return;
+  await replayQueuedMutations(options.force);
   const pending = getPendingRecords();
   if (!pending.length) {
     if (showToast) flash(t("synced"));
@@ -3449,6 +3538,8 @@ async function syncRecords(showToast, options = {}) {
     const response = await apiPost("/sync", { records: uploadResult.records });
     const { conflicts = [], ...serverData } = response;
     const data = mergeLocalPendingRecords(serverData, uploadResult.records, conflicts);
+    await clearSyncedMutationLogs(uploadResult.records, conflicts);
+    await hydratePendingMutationSummary(false);
     setState({ data: normalizeSelection(data), conflicts, serverOnline: true, activeConflictId: conflicts[0]?.local?.id || "", ...clearSyncRetryState() });
     if (showToast) flash(conflicts.length ? t("syncConflicts") : t("synced"));
   } catch (error) {
@@ -3459,10 +3550,42 @@ async function syncRecords(showToast, options = {}) {
       if (showToast) flash(t("syncConflicts"));
       return;
     }
-    setState({ serverOnline: false, ...createSyncRetryState(state.syncRetryAttempt) });
+    const nextAttempt = (Number(state.syncRetryAttempt) || 0) + 1;
+    const delay = calculateExponentialBackoffDelay(nextAttempt);
+    setState({ serverOnline: false, syncRetryAttempt: nextAttempt, syncRetryAt: Date.now() + delay });
     scheduleSyncRetry();
     if (showToast) flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
   }
+}
+
+async function replayQueuedMutations(force = false) {
+  const mutations = await listPendingMutations();
+  const now = Date.now();
+  for (const mutation of mutations) {
+    if (!force && mutation.retryAt && mutation.retryAt > now) continue;
+    if (mutation.type === "record.update" || mutation.type === "record.merge") continue;
+    try {
+      if (mutation.type === "form.upload") {
+        const formData = await buildQueuedFormData(mutation);
+        const response = await apiFormPost(mutation.endpoint, formData);
+        if (response?.projects && response?.records) setData(response);
+      }
+      await deletePendingMutation(mutation.id);
+    } catch (error) {
+      await markMutationRetry(mutation, error?.message || t("serverOffline"));
+    }
+  }
+  await hydratePendingMutationSummary(false);
+}
+
+async function buildQueuedFormData(mutation) {
+  const formData = new FormData();
+  Object.entries(mutation.formFields || {}).forEach(([key, value]) => formData.append(key, value));
+  const assets = await listPendingAssets(mutation.id);
+  assets.forEach((asset) => {
+    formData.append(asset.fieldName || "files", asset.blob, asset.name || "upload");
+  });
+  return formData;
 }
 
 function persistUploadedAttachmentRecords(records) {
@@ -3490,6 +3613,17 @@ function mergeLocalPendingRecords(serverData, pendingRecords, conflicts = []) {
     }
   }
   return refreshLocalStatuses({ ...serverData, records });
+}
+
+async function clearSyncedMutationLogs(records, conflicts = []) {
+  const conflictIds = new Set(conflicts.map((item) => item.local?.id).filter(Boolean));
+  const mutations = await listPendingMutations();
+  const syncedRecordIds = new Set(records.map((record) => record.id).filter((id) => !conflictIds.has(id)));
+  await Promise.all(
+    mutations
+      .filter((mutation) => mutation.recordId && syncedRecordIds.has(mutation.recordId))
+      .map((mutation) => deletePendingMutation(mutation.id))
+  );
 }
 
 function extractConflictsFromError(error, pendingRecords) {
@@ -3520,6 +3654,25 @@ function getActiveConflict() {
   return state.conflicts.find((item) => item.local?.id === state.activeConflictId) || state.conflicts[0];
 }
 
+function getConflictFields(localData = {}, serverData = {}) {
+  const keys = ["status", "result", "assignee", "comments", "due", "title", "reference", "updatedAt"];
+  return keys
+    .filter((key) => JSON.stringify(localData?.[key] ?? "") !== JSON.stringify(serverData?.[key] ?? ""))
+    .map((key) => ({
+      key,
+      label: key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase()),
+      localValue: localData?.[key] ?? "",
+      serverValue: serverData?.[key] ?? "",
+      defaultLocal: ["status", "result", "comments"].includes(key)
+    }));
+}
+
+function formatConflictValue(value) {
+  if (Array.isArray(value)) return `${value.length} item(s)`;
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return value || "-";
+}
+
 function openConflictForRecord(recordId) {
   const conflict = state.conflicts.find((item) => item.local?.id === recordId);
   if (conflict) {
@@ -3541,6 +3694,57 @@ async function resolveActiveConflict(strategy) {
     return;
   }
   await useLocalConflictData(conflict);
+}
+
+async function commitGranularConflictMerge() {
+  const conflict = getActiveConflict();
+  if (!conflict?.local?.id) return;
+  const localData = conflict.local || {};
+  const serverData = conflict.server || {};
+  const fields = getConflictFields(localData, serverData);
+  const selectedLocal = new Set([...document.querySelectorAll("[data-merge-field]:checked")].map((input) => input.dataset.mergeField));
+  const merged = { ...serverData, id: localData.id || serverData.id };
+  fields.forEach((field) => {
+    merged[field.key] = selectedLocal.has(field.key) ? localData[field.key] : serverData[field.key];
+  });
+  await applyMergedConflictRecord(conflict, merged);
+}
+
+async function applyMergedConflictRecord(conflict, mergedRecord) {
+  const now = new Date();
+  const records = state.data.records.map((record) => {
+    if (record.id !== conflict.local.id) return record;
+    return {
+      ...record,
+      ...mergedRecord,
+      sync: "pending",
+      hasConflict: false,
+      revision: Number(conflict.server?.revision || record.revision || 0) + 1,
+      baseServerUpdatedAt: conflict.server?.serverUpdatedAt || record.serverUpdatedAt || Date.now(),
+      localUpdatedAt: now.getTime(),
+      updatedAt: now.toLocaleString("sv-SE")
+    };
+  });
+  const resolved = records.find((record) => record.id === conflict.local.id);
+  if (resolved) {
+    await queuePendingMutation({
+      type: "record.merge",
+      endpoint: "/sync",
+      payload: resolved,
+      recordId: resolved.id,
+      equipmentId: resolved.equipmentId
+    });
+  }
+  const conflicts = state.conflicts.filter((item) => item.local?.id !== conflict.local.id);
+  setState({
+    data: refreshLocalStatuses({ ...state.data, records }),
+    conflicts,
+    activeConflictId: conflicts[0]?.local?.id || "",
+    syncQueueOpen: Boolean(conflicts.length),
+    ...clearSyncRetryState()
+  });
+  await hydratePendingMutationSummary(false);
+  await syncRecords(true, { force: true });
 }
 
 function keepServerConflictData(conflict) {
@@ -3684,6 +3888,27 @@ async function saveMedia(event) {
     setState({ mediaEquipmentId: equipmentId, mediaUploadOpen: false, mediaUploadEquipmentId: "", toast: t("mediaSaved") });
     window.setTimeout(() => setState({ toast: "" }), 1800);
   } catch (error) {
+    if (!navigator.onLine || !error?.status || error?.status >= 500) {
+      const formData = new FormData();
+      formData.append("equipmentId", equipmentId);
+      formData.append("category", payload.category || getUploadMediaCategory());
+      formData.append("title", payload.title || "");
+      formData.append("reference", payload.reference || "");
+      formData.append("comments", payload.comments || "");
+      files.forEach((file) => formData.append("files", file));
+      await queueFormUploadMutation("/admin/media-upload", formData, {
+        equipmentId,
+        type: "media.upload",
+        lastError: error?.message || t("serverOffline")
+      });
+      await hydratePendingMutationSummary(false);
+      pendingMediaUploadFiles = [];
+      pendingMediaUploadDraft = {};
+      setState({ mediaUploadOpen: false, mediaUploadEquipmentId: "", syncQueueOpen: true });
+      flash("Upload queued for offline sync");
+      mediaUploadSaving = false;
+      return;
+    }
     mediaUploadSaving = false;
     render();
     console.warn("Media upload failed.", error);
