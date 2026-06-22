@@ -51,6 +51,7 @@ jobs:
           node --check server/config.js
           node --check scripts/import-json-to-postgres.mjs
           node --check scripts/smoke-postgres-api.mjs
+          node --check scripts/smoke-permissions.mjs
           npm audit
 
       - name: Build frontend
@@ -78,6 +79,9 @@ jobs:
 
       - name: Smoke test PostgreSQL API
         run: node scripts/smoke-postgres-api.mjs
+
+      - name: Smoke test permissions
+        run: node scripts/smoke-permissions.mjs
 
       - name: Stop API
         if: always()
