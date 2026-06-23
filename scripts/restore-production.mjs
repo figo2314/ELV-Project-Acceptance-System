@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const databaseUrl = process.env.DATABASE_URL;
+const postgresCliUrl = databaseUrl ? toPostgresCliUrl(databaseUrl) : "";
 const uploadDir = path.resolve(rootDir, process.env.UPLOAD_DIR || "data/uploads");
 const backupDir = path.resolve(rootDir, process.argv[2] || "");
 const confirmed = process.argv.includes("--confirm");
@@ -29,7 +30,7 @@ if (!databaseUrl) {
     "--no-owner",
     "--no-privileges",
     "--dbname",
-    databaseUrl,
+    postgresCliUrl,
     databaseDump
   ]);
 
@@ -51,6 +52,12 @@ if (!databaseUrl) {
   }, null, 2));
 }
 
+function toPostgresCliUrl(value) {
+  const url = new URL(value);
+  url.searchParams.delete("schema");
+  return url.toString();
+}
+
 function fail(message) {
   console.error(message);
   process.exit(1);
@@ -58,7 +65,7 @@ function fail(message) {
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit", shell: process.platform === "win32" });
+    const child = spawn(command, args, { stdio: "inherit" });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) {

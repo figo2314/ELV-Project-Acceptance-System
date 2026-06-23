@@ -110,13 +110,14 @@ async function expectStatus(method, path, body, token, expectedStatus) {
 }
 
 async function apiFetch(path, options = {}) {
+  const method = options.method || "GET";
   const response = await fetch(`${apiBase}${path}`, {
-    method: options.method || "GET",
+    method,
     headers: {
       "Content-Type": "application/json",
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
     },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: ["GET", "HEAD"].includes(method) || options.body === undefined ? undefined : JSON.stringify(options.body)
   });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};

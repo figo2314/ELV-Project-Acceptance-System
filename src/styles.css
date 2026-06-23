@@ -279,6 +279,11 @@ button.sync-pill:focus-visible {
   width: min(100%, 920px);
 }
 
+.login-grid.single {
+  grid-template-columns: minmax(320px, 460px);
+  max-width: 460px;
+}
+
 .login-card {
   background: #fff;
   border: 1px solid var(--line);

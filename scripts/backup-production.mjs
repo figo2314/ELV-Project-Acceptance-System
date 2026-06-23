@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const databaseUrl = process.env.DATABASE_URL;
+const postgresCliUrl = databaseUrl ? toPostgresCliUrl(databaseUrl) : "";
 const backupRoot = path.resolve(rootDir, process.env.BACKUP_DIR || "backups");
 const uploadDir = path.resolve(rootDir, process.env.UPLOAD_DIR || "data/uploads");
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -26,7 +27,7 @@ if (!databaseUrl) {
     "--no-privileges",
     "--file",
     databaseDump,
-    databaseUrl
+    postgresCliUrl
   ]);
 
   await run("tar", [
@@ -49,9 +50,15 @@ if (!databaseUrl) {
   console.log(JSON.stringify({ ok: true, backupDir, ...manifest }, null, 2));
 }
 
+function toPostgresCliUrl(value) {
+  const url = new URL(value);
+  url.searchParams.delete("schema");
+  return url.toString();
+}
+
 function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit", shell: process.platform === "win32" });
+    const child = spawn(command, args, { stdio: "inherit" });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) {

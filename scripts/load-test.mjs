@@ -5,8 +5,9 @@ const username = process.env.LOAD_USERNAME || "field";
 const password = process.env.LOAD_PASSWORD || "field123";
 const adminUsername = process.env.LOAD_ADMIN_USERNAME || "admin";
 const adminPassword = process.env.LOAD_ADMIN_PASSWORD || "admin123";
+const useSharedSession = String(process.env.LOAD_SHARED_SESSION || "false").toLowerCase() === "true";
 
-const deadline = Date.now() + durationSeconds * 1000;
+let deadline = 0;
 const results = [];
 
 async function main() {
@@ -16,7 +17,9 @@ async function main() {
   const record = seed.records[0];
   if (!equipment?.id || !record?.id) throw new Error("Load test requires seeded equipment and records.");
 
-  const workers = Array.from({ length: concurrency }, (_, index) => worker(index, equipment, record));
+  const sharedSession = useSharedSession ? await measure("login", () => login(username, password)) : null;
+  deadline = Date.now() + durationSeconds * 1000;
+  const workers = Array.from({ length: concurrency }, (_, index) => worker(index, equipment, record, sharedSession));
   await Promise.all(workers);
 
   const summary = summarize(results);
@@ -25,8 +28,8 @@ async function main() {
   if (summary.p95Ms > Number(process.env.LOAD_MAX_P95_MS || 2500)) process.exitCode = 1;
 }
 
-async function worker(index, equipment, record) {
-  const session = await measure("login", () => login(username, password));
+async function worker(index, equipment, record, sharedSession) {
+  const session = sharedSession || await measure("login", () => login(username, password));
   while (Date.now() < deadline) {
     await measure("bootstrap", () => apiGet("/bootstrap", session.token));
     await measure("sync", () => apiPost("/sync", {
@@ -135,6 +138,7 @@ function summarize(items) {
     apiBase,
     concurrency,
     durationSeconds,
+    sharedSession: useSharedSession,
     requests: items.length,
     errors: items.filter((item) => !item.ok).length,
     p50Ms: percentile(sorted, 0.5),

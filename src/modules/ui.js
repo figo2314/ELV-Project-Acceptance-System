@@ -20,6 +20,17 @@ import {
 } from "./state.js";
 
 const KNOWN_EQUIPMENT_TYPES = ["DDC Panel", "Temperature Sensor", "Air Handling Unit", "Lighting Panel", "Power Meter", "Controller", "Sensor", "Actuator", "Valve", "Meter", "Equipment"];
+const DEMO_ACCOUNTS =
+  Boolean(import.meta.env?.DEV) ||
+  String(import.meta.env?.VITE_SHOW_DEMO_ACCOUNTS || "").toLowerCase() === "true"
+    ? [
+        { role: "Admin", username: "admin", password: "admin123", note: "Full dashboard, data, import, people" },
+        { role: "Manager", username: "manager", password: "manager123", note: "Project management and reporting" },
+        { role: "Engineer", username: "engineer", password: "engineer123", note: "Data table, issues, media tools" },
+        { role: "Field", username: "field", password: "field123", note: "Mobile inspection workflow" }
+      ]
+    : [];
+const SHOW_DEMO_ACCOUNTS = DEMO_ACCOUNTS.length > 0;
 
 const dictionary = {
   en: {
@@ -546,20 +557,14 @@ function render() {
 }
 
 function renderLogin() {
-  const demoAccounts = [
-    { role: "Admin", username: "admin", password: "admin123", note: "Full dashboard, data, import, people" },
-    { role: "Manager", username: "manager", password: "manager123", note: "Project management and reporting" },
-    { role: "Engineer", username: "engineer", password: "engineer123", note: "Data table, issues, media tools" },
-    { role: "Field", username: "field", password: "field123", note: "Mobile inspection workflow" }
-  ];
   return `
     <section class="login-shell">
-      <div class="login-grid">
+      <div class="login-grid ${SHOW_DEMO_ACCOUNTS ? "" : "single"}">
         <form class="login-card" data-login-form>
           <div>
             <p class="eyebrow">Access Control</p>
             <h2>Sign in to ELV Acceptance</h2>
-            <span>Use a demo account below to test the field and admin workflows.</span>
+            <span>${SHOW_DEMO_ACCOUNTS ? "Use a demo account below to test the field and admin workflows." : "Sign in with the account issued by your administrator."}</span>
           </div>
           <label>Username
             <input name="username" value="${escapeHtml(state.loginUsername || "")}" autocomplete="username" />
@@ -569,14 +574,14 @@ function renderLogin() {
           </label>
           <button class="primary" type="submit">Login</button>
         </form>
-        <aside class="demo-login-card" aria-label="Demo accounts">
+        ${SHOW_DEMO_ACCOUNTS ? `<aside class="demo-login-card" aria-label="Demo accounts">
           <div>
             <p class="eyebrow">Demo Accounts</p>
             <h3>Quick test login</h3>
             <span>Click any account to fill the login form.</span>
           </div>
           <div class="demo-account-list">
-            ${demoAccounts.map((account) => `
+            ${DEMO_ACCOUNTS.map((account) => `
               <button type="button" class="demo-account" data-demo-login="${encodeURIComponent(JSON.stringify(account))}">
                 <strong>${escapeHtml(account.role)}</strong>
                 <span><b>${escapeHtml(account.username)}</b> / ${escapeHtml(account.password)}</span>
@@ -584,7 +589,7 @@ function renderLogin() {
               </button>
             `).join("")}
           </div>
-        </aside>
+        </aside>` : ""}
       </div>
     </section>
   `;
