@@ -389,6 +389,8 @@ function defaultState() {
     selectedRecordId: "r1",
     fieldMobileLevel: "project",
     fieldMobilePath: {},
+    fieldSearch: "",
+    fieldSearchDraft: "",
     toast: "",
     conflicts: [],
     adminProjectId: "p1",
@@ -673,28 +675,114 @@ function renderAdminNav() {
 function renderField() {
   const isMobileDetail = state.fieldMobileLevel === "detail";
   return `
-    <section class="field-grid ${isMobileDetail ? "mobile-detail-open" : ""}">
-      <aside class="panel stack field-sidebar">
-        <div class="field-desktop-tree">
-          ${renderFieldTree()}
-        </div>
-        <div class="field-mobile-drill">
-          ${renderFieldMobileDrill()}
-        </div>
-      </aside>
-      <section class="panel detail field-detail">
-        ${renderFieldOperation()}
+    <section class="field-workbench">
+      ${renderFieldCommandBar()}
+      <section class="field-grid ${isMobileDetail ? "mobile-detail-open" : ""}">
+        <aside class="panel stack field-sidebar">
+          <div class="field-desktop-tree">
+            ${renderFieldTree()}
+          </div>
+          <div class="field-mobile-drill">
+            ${renderFieldMobileDrill()}
+          </div>
+        </aside>
+        <section class="panel detail field-detail">
+          ${renderFieldOperation()}
+        </section>
       </section>
     </section>
   `;
 }
 
-function renderFieldTree() {
+function renderFieldCommandBar() {
+  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  const records = equipment ? state.data.records.filter((record) => record.equipmentId === equipment.id) : [];
+  const stats = getStats(records);
+  const openCount = stats.pending + stats.failed + stats.rectification;
+  const searchValue = state.fieldSearchDraft ?? state.fieldSearch ?? "";
+  const path = equipment ? getFieldMobileBreadcrumbItems({ ...getFieldMobilePathForEquipment(equipment), equipment: equipment.name }) : [];
+  const assigneeName = state.currentUser?.name || state.currentUser?.username || "";
+  const myOpen = assigneeName
+    ? state.data.records.filter((record) => record.assignee === assigneeName && !["passed", "closed"].includes(record.status)).length
+    : 0;
   return `
-    <div class="section-title">${t("treeView")}</div>
-    <div class="tree-view field-tree-view">
-      ${state.data.projects.map((project) => renderFieldProjectBranch(project)).join("")}
+    <section class="field-command-bar">
+      <div class="field-command-main">
+        <p class="eyebrow">Field Workbench</p>
+        <h2>${escapeHtml(equipment?.name || t("equipment"))}</h2>
+        <div class="field-route-line">
+          ${path.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("") || `<span>Select a route to start</span>`}
+        </div>
+      </div>
+      <label class="field-search-control">
+        <span>Search equipment / point / location</span>
+        <input data-field-search value="${escapeHtml(searchValue)}" placeholder="${t("search")}" autocomplete="off" />
+        ${searchValue ? `<button type="button" data-field-search-clear aria-label="Clear field search">Clear</button>` : ""}
+      </label>
+      <div class="field-kpi-strip" aria-label="Current field task summary">
+        ${fieldKpi("Open", openCount)}
+        ${fieldKpi(t("failed"), stats.failed + stats.rectification)}
+        ${fieldKpi(t("completion"), `${stats.completion}%`)}
+        ${fieldKpi("Mine", myOpen)}
+      </div>
+    </section>
+  `;
+}
+
+function fieldKpi(label, value) {
+  return `<span class="field-kpi"><strong>${escapeHtml(String(value))}</strong><small>${escapeHtml(label)}</small></span>`;
+}
+
+function renderFieldTree() {
+  const search = getFieldSearchTerm();
+  return `
+    <div class="field-sidebar-tools">
+      <div>
+        <div class="section-title">${search ? "Search Results" : t("treeView")}</div>
+        <p>${search ? `Matching "${escapeHtml(search)}"` : "Site route, simplified for field navigation."}</p>
+      </div>
+      ${renderFieldSidebarSummary()}
     </div>
+    ${search ? renderFieldDesktopSearchResults(search) : `
+      <div class="tree-view field-tree-view">
+        ${state.data.projects.map((project) => renderFieldProjectBranch(project)).join("")}
+      </div>
+    `}
+  `;
+}
+
+function renderFieldSidebarSummary() {
+  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
+  if (!equipment) return "";
+  const stats = getStats(state.data.records.filter((record) => record.equipmentId === equipment.id));
+  return `
+    <div class="field-sidebar-summary">
+      <strong>${escapeHtml(equipment.name)}</strong>
+      <span>${escapeHtml(equipment.type)} · ${stats.pending} pending · ${stats.failed + stats.rectification} issue</span>
+    </div>
+  `;
+}
+
+function renderFieldDesktopSearchResults(search) {
+  const options = getFieldSearchOptions(search);
+  return `
+    <div class="field-search-results">
+      ${options.map((item) => renderFieldDesktopSearchResult(item)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
+    </div>
+  `;
+}
+
+function renderFieldDesktopSearchResult(option) {
+  const node = { type: "equipment", equipmentId: option.equipmentId, projectId: option.projectId, locationId: option.locationId };
+  return `
+    <button class="field-desktop-result ${option.status || ""}" data-field-tree-node="${encodeTreeNode(node)}">
+      <span>
+        <strong>${escapeHtml(option.label)}</strong>
+        <small>${escapeHtml(option.meta || "")}</small>
+        ${option.detail ? `<small>${escapeHtml(option.detail)}</small>` : ""}
+      </span>
+      <em>${escapeHtml(option.action || "Open")}</em>
+    </button>
   `;
 }
 
@@ -739,33 +827,47 @@ function renderFieldTreeNode(node, level, status = "") {
 
 function renderFieldMobileDrill() {
   const level = state.fieldMobileLevel || "project";
-  const path = state.fieldMobilePath || {};
+  const path = level === "project" ? {} : (state.fieldMobilePath || {});
   if (level === "detail") return renderFieldMobileDetailNav();
 
-  const options = getFieldMobileOptions(level, path);
+  const search = getFieldSearchTerm();
+  const options = search ? getFieldSearchOptions(search) : getFieldMobileOptions(level, path);
   const step = getFieldMobileStepInfo(level);
+  const scopeRecords = search ? getRecordsForFieldSearch(search) : getRecordsForFieldMobileScope(path);
   return `
     <div class="mobile-drill-shell">
       <div class="mobile-drill-nav-card">
         <div class="mobile-drill-topline">
           ${renderFieldMobileBackButton(level, path)}
-          <span class="mobile-step-pill">Step ${step.current}/${step.total}</span>
+          <span class="mobile-step-pill">${search ? "Search" : `Step ${step.current}/${step.total}`}</span>
         </div>
         <div class="mobile-current-level">
-          <p class="eyebrow">Now selecting</p>
-          <div class="section-title">${getFieldMobilePrompt(level)}</div>
-          <p>${getFieldMobileContext(level, path)}</p>
+          <p class="eyebrow">${search ? "Fast find" : "Now selecting"}</p>
+          <div class="section-title">${search ? "Search Results" : getFieldMobilePrompt(level)}</div>
+          <p>${search ? `Showing equipment that matches "${escapeHtml(search)}".` : getFieldMobileContext(level, path)}</p>
         </div>
+        ${renderFieldMobileScopeStats(scopeRecords)}
         <div class="mobile-drill-meta">
           <span>${options.length} options</span>
-          <span>${getFieldMobileTitle(level)}</span>
+          <span>${search ? "Tap equipment to open checklist" : getFieldMobileTitle(level)}</span>
         </div>
       </div>
-      ${renderFieldMobileStepper(level)}
+      ${search ? "" : renderFieldMobileStepper(level)}
       ${renderFieldMobileBreadcrumb(path)}
       <div class="mobile-drill-list">
         ${options.map((item) => renderFieldMobileChoice(item)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
       </div>
+    </div>
+  `;
+}
+
+function renderFieldMobileScopeStats(records) {
+  const stats = getStats(records);
+  return `
+    <div class="field-mobile-scope-stats">
+      <span><strong>${stats.pending}</strong><small>${t("pending")}</small></span>
+      <span><strong>${stats.failed + stats.rectification}</strong><small>${t("failed")}</small></span>
+      <span><strong>${stats.completion}%</strong><small>${t("completion")}</small></span>
     </div>
   `;
 }
@@ -813,6 +915,7 @@ function renderFieldMobileChoice(item) {
       <span>
         <strong>${escapeHtml(item.label)}</strong>
         <small>${escapeHtml(item.meta || "")}</small>
+        ${item.detail ? `<small class="field-choice-detail">${escapeHtml(item.detail)}</small>` : ""}
         ${item.progress !== undefined ? `<i><b style="width:${item.progress}%"></b></i>` : ""}
       </span>
       <em>${item.action || ">"}</em>
@@ -927,73 +1030,181 @@ function getFieldMobileTitle(level) {
 
 function getFieldMobileOptions(level, path) {
   if (level === "project") {
-    return state.data.projects.map((project) => ({
-      label: project.name,
-      meta: `${state.data.equipment.filter((item) => item.projectId === project.id).length} ${t("equipment")}`,
-      progress: getStats(state.data.records.filter((record) => record.projectId === project.id)).completion,
-      payload: { level, projectId: project.id }
-    }));
+    return state.data.projects.map((project) => {
+      const records = state.data.records.filter((record) => record.projectId === project.id);
+      const stats = getStats(records);
+      return {
+        label: project.name,
+        meta: `${state.data.equipment.filter((item) => item.projectId === project.id).length} ${t("equipment")}`,
+        detail: `${stats.pending} pending · ${stats.failed + stats.rectification} issue`,
+        progress: stats.completion,
+        status: getFieldTone(stats),
+        payload: { level, projectId: project.id }
+      };
+    });
   }
 
   const projectId = path.projectId || state.selectedProjectId;
   const tree = buildLocationTree(projectId);
   if (level === "building") {
-    return [...tree.values()].map((building) => ({
-      label: building.label,
-      meta: t("building"),
-      progress: getStats(getRecordsForFieldPath({ projectId, building: building.building })).completion,
-      payload: { level, projectId, building: building.building }
-    }));
+    return [...tree.values()].map((building) => {
+      const records = getRecordsForFieldPath({ projectId, building: building.building });
+      const stats = getStats(records);
+      return {
+        label: building.label,
+        meta: t("building"),
+        detail: `${stats.pending} pending · ${stats.failed + stats.rectification} issue`,
+        progress: stats.completion,
+        status: getFieldTone(stats),
+        payload: { level, projectId, building: building.building }
+      };
+    });
   }
 
   const building = tree.get(path.building);
   if (level === "floor") {
-    return [...(building?.children?.values() || [])].map((floor) => ({
-      label: floor.label,
-      meta: t("floor"),
-      progress: getStats(getRecordsForFieldPath({ projectId, building: path.building, floor: floor.floor })).completion,
-      payload: { level, projectId, building: path.building, floor: floor.floor }
-    }));
+    return [...(building?.children?.values() || [])].map((floor) => {
+      const records = getRecordsForFieldPath({ projectId, building: path.building, floor: floor.floor });
+      const stats = getStats(records);
+      return {
+        label: floor.label,
+        meta: t("floor"),
+        detail: `${stats.pending} pending · ${stats.failed + stats.rectification} issue`,
+        progress: stats.completion,
+        status: getFieldTone(stats),
+        payload: { level, projectId, building: path.building, floor: floor.floor }
+      };
+    });
   }
 
   const floor = building?.children?.get(path.floor);
   if (level === "room") {
-    return [...(floor?.children?.values() || [])].map((room) => ({
-      label: room.label,
-      meta: t("room"),
-      progress: getStats(state.data.records.filter((record) => record.locationId === room.locationId)).completion,
-      payload: { level, projectId, building: path.building, floor: path.floor, room: room.room, locationId: room.locationId }
-    }));
+    return [...(floor?.children?.values() || [])].map((room) => {
+      const records = state.data.records.filter((record) => record.locationId === room.locationId);
+      const stats = getStats(records);
+      return {
+        label: room.label,
+        meta: t("room"),
+        detail: `${stats.pending} pending · ${stats.failed + stats.rectification} issue`,
+        progress: stats.completion,
+        status: getFieldTone(stats),
+        payload: { level, projectId, building: path.building, floor: path.floor, room: room.room, locationId: room.locationId }
+      };
+    });
   }
 
   const locationEquipment = state.data.equipment.filter((item) => item.locationId === path.locationId);
   if (level === "team") {
-    return [...new Set(locationEquipment.map((item) => item.team))].map((team) => ({
-      label: team,
-      meta: `${locationEquipment.filter((item) => item.team === team).length} ${t("equipment")}`,
-      progress: getStats(state.data.records.filter((record) => record.locationId === path.locationId && record.team === team)).completion,
-      payload: { level, projectId, building: path.building, floor: path.floor, room: path.room, locationId: path.locationId, team }
-    }));
+    return [...new Set(locationEquipment.map((item) => item.team))].map((team) => {
+      const records = state.data.records.filter((record) => record.locationId === path.locationId && record.team === team);
+      const stats = getStats(records);
+      return {
+        label: team,
+        meta: `${locationEquipment.filter((item) => item.team === team).length} ${t("equipment")}`,
+        detail: `${stats.pending} pending · ${stats.failed + stats.rectification} issue`,
+        progress: stats.completion,
+        status: getFieldTone(stats),
+        payload: { level, projectId, building: path.building, floor: path.floor, room: path.room, locationId: path.locationId, team }
+      };
+    });
   }
 
   if (level === "equipment") {
     return locationEquipment
       .filter((item) => item.team === path.team)
-      .map((item) => {
-        const records = state.data.records.filter((record) => record.equipmentId === item.id);
-        const stats = getStats(records);
-        return {
-          label: item.name,
-          meta: `${item.type} / ${stats.completion}% ${t("completion")}`,
-          action: statusLabel(item.status),
-          progress: stats.completion,
-          status: item.status,
-          payload: { level, equipmentId: item.id }
-        };
-      });
+      .map((item) => fieldEquipmentToChoice(item));
   }
 
   return [];
+}
+
+function getFieldSearchTerm() {
+  return String(state.fieldSearch || "").trim().toLowerCase();
+}
+
+function updateFieldSearch(value) {
+  const patch = {
+    fieldSearch: value,
+    fieldSearchDraft: value
+  };
+  if (String(value || "").trim()) {
+    patch.fieldMobileLevel = state.fieldMobileLevel === "detail" ? "project" : state.fieldMobileLevel;
+    patch.fieldMobilePath = state.fieldMobileLevel === "project" || state.fieldMobileLevel === "detail" ? {} : state.fieldMobilePath;
+  }
+  setState(patch);
+}
+
+function getFieldSearchOptions(search = getFieldSearchTerm()) {
+  const term = String(search || "").trim().toLowerCase();
+  if (!term) return [];
+  return state.data.equipment
+    .filter((item) => fieldEquipmentMatches(item, term))
+    .map((item) => fieldEquipmentToChoice(item))
+    .sort((a, b) => getFieldToneRank(a.status) - getFieldToneRank(b.status) || String(a.label).localeCompare(String(b.label)))
+    .slice(0, 40);
+}
+
+function getRecordsForFieldSearch(search = getFieldSearchTerm()) {
+  const equipmentIds = new Set(getFieldSearchOptions(search).map((item) => item.equipmentId));
+  return state.data.records.filter((record) => equipmentIds.has(record.equipmentId));
+}
+
+function fieldEquipmentMatches(item, term) {
+  const location = getLocationName(item.locationId);
+  const project = getProjectName(item.projectId);
+  const records = state.data.records.filter((record) => record.equipmentId === item.id);
+  const pointNames = state.data.points.filter((point) => point.equipmentId === item.id).map((point) => `${point.name} ${point.type} ${point.reference || ""}`);
+  const haystack = [
+    project,
+    location,
+    item.name,
+    item.type,
+    item.team,
+    item.status,
+    ...pointNames,
+    ...records.map((record) => `${record.assignee || ""} ${record.status || ""} ${record.comments || ""}`)
+  ].join(" ").toLowerCase();
+  return haystack.includes(term);
+}
+
+function fieldEquipmentToChoice(item) {
+  const records = state.data.records.filter((record) => record.equipmentId === item.id);
+  const stats = getStats(records);
+  const parts = parseLocationParts(getLocationName(item.locationId));
+  const status = getFieldTone(stats) || item.status;
+  return {
+    equipmentId: item.id,
+    projectId: item.projectId,
+    locationId: item.locationId,
+    label: item.name,
+    meta: `${item.type} · ${parts.floor} / ${parts.room}`,
+    detail: `${stats.pending} pending · ${stats.failed + stats.rectification} issue · ${stats.total} points`,
+    action: "Open",
+    progress: stats.completion,
+    status,
+    payload: { level: "equipment", equipmentId: item.id }
+  };
+}
+
+function getRecordsForFieldMobileScope(path = {}) {
+  if (path.locationId && path.team) {
+    return state.data.records.filter((record) => record.locationId === path.locationId && record.team === path.team);
+  }
+  if (path.locationId) return state.data.records.filter((record) => record.locationId === path.locationId);
+  if (path.projectId || path.building || path.floor || path.room) return getRecordsForFieldPath(path);
+  return state.data.records;
+}
+
+function getFieldTone(stats) {
+  if (!stats.total) return "";
+  if (stats.failed) return "failed";
+  if (stats.rectification) return "rectification";
+  if (stats.pending) return "pending";
+  return "passed";
+}
+
+function getFieldToneRank(status) {
+  return { failed: 0, rectification: 1, pending: 2, passed: 3, closed: 4 }[status] ?? 5;
 }
 
 function getRecordsForFieldPath(path) {
@@ -3204,6 +3415,12 @@ function bindEvents() {
   document.querySelectorAll("[data-field-tree-node]").forEach((button) => {
     button.addEventListener("click", () => selectFieldTreeNode(JSON.parse(decodeURIComponent(button.dataset.fieldTreeNode))));
   });
+  document.querySelectorAll("[data-field-search]").forEach((field) => {
+    field.addEventListener("input", () => updateDebouncedSearch("fieldSearch", field.value, { fieldSearchDraft: field.value }, (value) => updateFieldSearch(value)));
+  });
+  document.querySelectorAll("[data-field-search-clear]").forEach((button) => {
+    button.addEventListener("click", () => updateFieldSearch(""));
+  });
   document.querySelectorAll("[data-field-mobile-choice]").forEach((button) => {
     button.addEventListener("click", () => selectFieldMobileChoice(JSON.parse(decodeURIComponent(button.dataset.fieldMobileChoice))));
   });
@@ -3392,12 +3609,13 @@ function selectFieldTreeNode(node) {
     selectedPointId: point?.id || "",
     selectedRecordId: record?.id || "",
     fieldMobileLevel: "detail",
-    fieldMobilePath: getFieldMobilePathForEquipment(equipment)
+    fieldMobilePath: getFieldMobilePathForEquipment(equipment),
+    fieldSearch: "",
+    fieldSearchDraft: ""
   });
 }
 
 function selectFieldMobileChoice(payload) {
-  const currentPath = state.fieldMobilePath || {};
   if (payload.level === "equipment") {
     selectFieldTreeNode({ type: "equipment", equipmentId: payload.equipmentId });
     return;
@@ -3410,8 +3628,34 @@ function selectFieldMobileChoice(payload) {
     selectedLocationId: payload.locationId || state.selectedLocationId,
     selectedTeam: payload.team || state.selectedTeam,
     fieldMobileLevel: nextLevel,
-    fieldMobilePath: { ...currentPath, ...payload }
+    fieldMobilePath: getCleanFieldMobilePath(payload)
   });
+}
+
+function getCleanFieldMobilePath(payload) {
+  if (payload.level === "project") {
+    return { projectId: payload.projectId };
+  }
+  if (payload.level === "building") {
+    return { projectId: payload.projectId, building: payload.building };
+  }
+  if (payload.level === "floor") {
+    return { projectId: payload.projectId, building: payload.building, floor: payload.floor };
+  }
+  if (payload.level === "room") {
+    return { projectId: payload.projectId, building: payload.building, floor: payload.floor, room: payload.room, locationId: payload.locationId };
+  }
+  if (payload.level === "team") {
+    return {
+      projectId: payload.projectId,
+      building: payload.building,
+      floor: payload.floor,
+      room: payload.room,
+      locationId: payload.locationId,
+      team: payload.team
+    };
+  }
+  return {};
 }
 
 function goFieldMobileBack() {
