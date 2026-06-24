@@ -2025,7 +2025,7 @@ function renderPointSummary(point) {
 }
 
 function getProjectProgressTone(stats) {
-  if (stats.total === 0 || stats.completion === 0) return "empty";
+  if (stats.total === 0 || stats.completion === 0) return "no-progress";
   if (stats.failed || stats.rectification) return "risk";
   if (stats.completion === 100) return "complete";
   return "active";
