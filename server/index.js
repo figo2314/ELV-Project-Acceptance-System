@@ -15,6 +15,7 @@ import {
   appendPostgresAuditLog,
   createPostgresMedia,
   createPostgresSession,
+  deletePostgresUser,
   deletePostgresSession,
   findPostgresUserById,
   findPostgresUserByUsername,
@@ -843,17 +844,32 @@ app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) =>
     const username = String(body.username || "").trim().toLowerCase();
     const name = String(body.name || username || "User").trim();
     const role = roles.includes(body.role) ? body.role : "field";
+    const active = body.active === false || body.active === "false" ? false : true;
     const projectIds = Array.isArray(body.projectIds)
       ? body.projectIds.filter((id) => db.projects.some((project) => project.id === id))
       : String(body.projectIds || "").split(",").map((id) => id.trim()).filter((id) => db.projects.some((project) => project.id === id));
     if (!username) return mutationError(400, "Username is required.");
-    const existingIndex = db.users.findIndex((item) => item.id === body.id || item.username.toLowerCase() === username);
+    const requestedId = String(body.id || "").trim();
+    const existingByIdIndex = requestedId ? db.users.findIndex((item) => item.id === requestedId) : -1;
+    const existingByUsernameIndex = db.users.findIndex((item) => item.username.toLowerCase() === username);
+    if (existingByIdIndex !== -1 && existingByUsernameIndex !== -1 && existingByIdIndex !== existingByUsernameIndex) {
+      return mutationError(409, "Username is already used by another user.");
+    }
+    const existingIndex = existingByIdIndex !== -1 ? existingByIdIndex : existingByUsernameIndex;
+    const existingUser = existingIndex === -1 ? null : db.users[existingIndex];
+    if (existingUser?.id === user?.id && (role !== "admin" || !active)) {
+      return mutationError(400, "You cannot remove your own admin access.");
+    }
+    if (existingUser?.role === "admin" && (!active || role !== "admin")) {
+      const activeAdminCount = db.users.filter((item) => item.role === "admin" && item.active !== false).length;
+      if (activeAdminCount <= 1) return mutationError(400, "At least one active admin account is required.");
+    }
     const nextUser = {
       id: existingIndex === -1 ? createId("u") : db.users[existingIndex].id,
       username,
       name,
       role,
-      active: body.active === false || body.active === "false" ? false : true,
+      active,
       projectIds: role === "admin" ? [] : projectIds,
       createdAt: existingIndex === -1 ? new Date().toISOString() : db.users[existingIndex].createdAt,
       passwordHash: db.users[existingIndex]?.passwordHash || hashPassword(body.password || createTemporaryPassword()),
@@ -879,6 +895,39 @@ app.post("/api/admin/user", requireAuth(["admin"]), async (request, response) =>
   if (sendMutationError(response, result)) return;
   response.json(filterDbForUser(result, request.auth.user));
 });
+
+app.post("/api/admin/user/delete", requireAuth(["admin"]), asyncRoute(async (request, response) => {
+  const userId = String(request.body?.id || "").trim();
+  if (!userId) {
+    response.status(400).json({ error: "User id is required." });
+    return;
+  }
+
+  if (isPostgresMode) {
+    const result = await deletePostgresUser(request.auth.user, userId);
+    if (sendMutationError(response, result)) return;
+    response.json(result.data);
+    return;
+  }
+
+  const db = await withDbMutation(async (db) => {
+    const admin = getFreshUser(db, request.auth.user);
+    const index = db.users.findIndex((item) => item.id === userId);
+    if (index === -1) return mutationError(404, "User not found.");
+    const target = db.users[index];
+    if (target.id === admin?.id) return mutationError(400, "You cannot delete your own account.");
+    if (target.role === "admin" && target.active !== false) {
+      const activeAdminCount = db.users.filter((item) => item.role === "admin" && item.active !== false).length;
+      if (activeAdminCount <= 1) return mutationError(400, "At least one active admin account is required.");
+    }
+    db.sessions = (db.sessions || []).filter((item) => item.userId !== userId);
+    db.users.splice(index, 1);
+    appendAuditLog(db, admin, "user.delete", "user", userId, { username: target.username, role: target.role, active: target.active !== false });
+    return db;
+  });
+  if (sendMutationError(response, db)) return;
+  response.json(filterDbForUser(db, request.auth.user));
+}));
 
 app.post("/api/admin/user/unlock", requireAuth(["admin"]), asyncRoute(async (request, response) => {
   const userId = String(request.body?.id || "").trim();

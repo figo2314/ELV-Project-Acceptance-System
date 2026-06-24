@@ -1803,19 +1803,37 @@ function renderIssuesPage() {
 
 function renderPeoplePage() {
   const people = getPeopleStats();
+  const users = state.data.users || [];
+  const activeUsers = users.filter((user) => user.active !== false).length;
+  const lockedUsers = users.filter(isUserLocked).length;
+  const forcedPasswordUsers = users.filter((user) => user.mustChangePassword).length;
   return `
-    <section class="people-admin-grid">
-      <section class="panel">
-        <div class="section-title">${t("personStats")}</div>
-        <div class="people">
-          ${people.map((person) => `<div><strong>${escapeHtml(person.name || "-")}</strong><span>${person.done}/${person.total}</span><progress value="${person.done}" max="${person.total}"></progress></div>`).join("")}
+    <section class="people-page">
+      <section class="panel people-overview">
+        <div>
+          <p class="eyebrow">People & Access</p>
+          <h2>Personnel Management</h2>
+          <span>Manage login accounts, roles, project access, password resets and account lifecycle.</span>
+        </div>
+        <div class="people-kpi-grid">
+          ${renderPeopleKpi("Users", users.length)}
+          ${renderPeopleKpi("Active", activeUsers, "ok")}
+          ${renderPeopleKpi("Locked", lockedUsers, lockedUsers ? "danger" : "")}
+          ${renderPeopleKpi("Must Change", forcedPasswordUsers, forcedPasswordUsers ? "warn" : "")}
         </div>
       </section>
-      <section class="panel">
-        <div class="section-title">Access Control</div>
-        ${renderUserManagement()}
+
+      <section class="people-admin-grid">
+        <section class="panel person-stats-panel">
+          <div class="section-title">${t("personStats")}</div>
+          ${renderPersonStats(people)}
+        </section>
+        <section class="panel access-control-panel">
+          ${renderUserManagement()}
+        </section>
       </section>
-      <section class="panel audit-panel">
+
+      <section class="panel audit-panel people-audit-panel">
         <div class="section-title">Audit Log</div>
         ${renderAuditLog()}
       </section>
@@ -1823,12 +1841,50 @@ function renderPeoplePage() {
   `;
 }
 
+function renderPeopleKpi(label, value, tone = "") {
+  return `<div class="people-kpi ${tone}"><strong>${value}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderPersonStats(people) {
+  if (!people.length) return `<div class="empty small">No assigned inspection work yet.</div>`;
+  return `
+    <div class="people-stat-grid">
+      ${people.map((person) => {
+        const percent = person.total ? Math.round((person.done / person.total) * 100) : 0;
+        return `
+          <article class="person-stat-card">
+            <div>
+              <strong>${escapeHtml(person.name || "-")}</strong>
+              <span>${person.done}/${person.total} completed</span>
+            </div>
+            <em>${percent}%</em>
+            <div class="mini-progress"><span style="width:${percent}%"></span></div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderUserManagement() {
   const users = state.data.users || [];
+  const orderedUsers = [...users].sort((a, b) => {
+    const roleOrder = { admin: 0, manager: 1, engineer: 2, field: 3 };
+    return (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9) || String(a.name || a.username).localeCompare(String(b.name || b.username));
+  });
   return `
     <div class="user-management">
-      ${users.map(renderUserRow).join("")}
-      ${canManageUsers() ? renderUserRow({ id: "", username: "", name: "", role: "field", active: true, projectIds: [] }, true) : ""}
+      <div class="user-management-head">
+        <div>
+          <div class="section-title">Access Control</div>
+          <p class="muted">Add users, edit roles and project access, reset passwords, unlock or remove accounts.</p>
+        </div>
+        <span class="security-badge">${orderedUsers.length} accounts</span>
+      </div>
+      ${canManageUsers() ? renderUserRow({ id: "", username: "", name: "", role: "field", active: true, projectIds: state.data.projects[0] ? [state.data.projects[0].id] : [], mustChangePassword: true }, true) : ""}
+      <div class="user-card-list">
+        ${orderedUsers.map((user) => renderUserRow(user)).join("") || `<div class="empty small">No users found.</div>`}
+      </div>
     </div>
   `;
 }
@@ -1836,35 +1892,124 @@ function renderUserManagement() {
 function renderUserRow(user, isNew = false) {
   const disabled = canManageUsers() ? "" : "disabled";
   const locked = isUserLocked(user);
+  const active = user.active !== false;
+  const isSelf = !isNew && state.currentUser?.id === user.id;
+  const identityTag = isNew ? "button" : "div";
+  const identityAttributes = isNew ? `type="button" data-focus-new-user title="Start adding a team member"` : "";
+  const required = isNew ? "required" : "";
+  const passwordRequired = isNew ? "required" : "";
   const securityBadges = [
+    active ? `<span class="security-badge ok">Active</span>` : `<span class="security-badge danger">Inactive</span>`,
     user.mustChangePassword ? `<span class="security-badge warning">Password change</span>` : "",
     locked ? `<span class="security-badge danger">Locked</span>` : "",
     Number(user.failedLoginCount || 0) ? `<span class="security-badge">${Number(user.failedLoginCount || 0)} failed</span>` : ""
   ].join("");
+  const projectSummary = getUserProjectSummary(user);
   return `
-    <form class="user-row" data-user-editor="${escapeHtml(user.id || "")}">
-      <input name="name" value="${escapeHtml(user.name || "")}" placeholder="Name" ${disabled} />
-      <input name="username" value="${escapeHtml(user.username || "")}" placeholder="Username" ${disabled} />
-      <select name="role" ${disabled}>
-        ${["admin", "manager", "engineer", "field"].map((role) => option(role, role, user.role || "field")).join("")}
-      </select>
-      <input name="projectIds" value="${escapeHtml((user.projectIds || []).join(","))}" placeholder="Project IDs e.g. p1,p2" ${disabled} />
-      <input name="password" type="password" placeholder="${isNew ? "Temporary password" : "Reset password"}" ${disabled} />
-      <select name="active" ${disabled}>
-        ${option("true", "Active", user.active !== false ? "true" : "false")}
-        ${option("false", "Inactive", user.active === false ? "false" : "true")}
-      </select>
-      <label class="force-password-flag">
-        <input type="checkbox" name="mustChangePassword" value="true" ${user.mustChangePassword || isNew ? "checked" : ""} ${disabled} />
-        Force change
-      </label>
-      <div class="user-security-state">${securityBadges || `<span class="security-badge ok">OK</span>`}</div>
-      ${canManageUsers() ? `
-        ${locked && !isNew ? `<button class="ghost" type="button" data-unlock-user="${escapeHtml(user.id || "")}">Unlock</button>` : ""}
-        <button class="ghost" type="submit">${isNew ? "Add" : t("saveChanges")}</button>
-      ` : `<span class="badge">${escapeHtml(user.role || "")}</span>`}
+    <form class="user-card ${isNew ? "new-user-card" : ""} ${active ? "" : "inactive"} ${locked ? "locked" : ""}" data-user-editor="${escapeHtml(user.id || "")}" novalidate>
+      <div class="user-card-head">
+        <${identityTag} class="user-identity ${isNew ? "user-identity-button" : ""}" ${identityAttributes}>
+          <span class="user-avatar">${escapeHtml(getUserInitials(user, isNew))}</span>
+          <div>
+            <strong>${escapeHtml(isNew ? "Add team member" : user.name || user.username || "-")}</strong>
+            <small>${escapeHtml(isNew ? "Click here, fill required fields, then press Add User" : `@${user.username || "-"} · ${projectSummary}`)}</small>
+          </div>
+        </${identityTag}>
+        <div class="user-card-badges">
+          <span class="role-badge ${escapeHtml(user.role || "field")}">${escapeHtml(formatRoleLabel(user.role || "field"))}</span>
+          ${isSelf ? `<span class="security-badge">You</span>` : ""}
+        </div>
+      </div>
+
+      <div class="user-form-grid">
+        <label>Name
+          <input name="name" value="${escapeHtml(user.name || "")}" placeholder="Full name" ${required} ${disabled} />
+        </label>
+        <label>Username
+          <input name="username" value="${escapeHtml(user.username || "")}" placeholder="username" ${required} ${disabled} />
+        </label>
+        <label>Role
+          <select name="role" ${disabled}>
+            ${["admin", "manager", "engineer", "field"].map((role) => option(role, formatRoleLabel(role), user.role || "field")).join("")}
+          </select>
+        </label>
+        <label>Password
+          <input name="password" type="password" placeholder="${isNew ? "Temporary password" : "Leave blank to keep current"}" ${passwordRequired} ${disabled} />
+        </label>
+      </div>
+
+      ${renderProjectAccessEditor(user, disabled)}
+
+      <div class="user-card-foot">
+        <div class="user-switches">
+          <label class="switch-line">
+            <input type="checkbox" name="active" value="true" ${active ? "checked" : ""} ${disabled} />
+            Active account
+          </label>
+          <label class="switch-line">
+            <input type="checkbox" name="mustChangePassword" value="true" ${user.mustChangePassword || isNew ? "checked" : ""} ${disabled} />
+            Force password change
+          </label>
+        </div>
+        <div class="user-security-state">${securityBadges || `<span class="security-badge ok">OK</span>`}</div>
+        ${canManageUsers() ? `
+          <div class="user-card-actions">
+            ${locked && !isNew ? `<button class="ghost compact" type="button" data-unlock-user="${escapeHtml(user.id || "")}">Unlock</button>` : ""}
+            ${!isNew ? `<button class="danger-button compact" type="button" data-delete-user="${escapeHtml(user.id || "")}" data-delete-user-name="${escapeHtml(user.name || user.username || "this user")}" ${isSelf ? "disabled title=\"You cannot delete your own account\"" : ""}>Delete</button>` : ""}
+            <button class="primary compact" type="submit">${isNew ? "Add User" : "Save Changes"}</button>
+          </div>
+        ` : `<span class="badge">${escapeHtml(user.role || "")}</span>`}
+      </div>
     </form>
   `;
+}
+
+function renderProjectAccessEditor(user, disabled) {
+  const selected = new Set(Array.isArray(user.projectIds) ? user.projectIds : []);
+  const projects = state.data.projects || [];
+  return `
+    <div class="project-access-editor">
+      <div>
+        <strong>Project Access</strong>
+        <span>Admins can access every project. Other roles use the selected scope below.</span>
+      </div>
+      <div class="project-access-list">
+        ${projects.map((project) => `
+          <label class="project-access-pill">
+            <input type="checkbox" name="projectIds" value="${escapeHtml(project.id)}" ${selected.has(project.id) ? "checked" : ""} ${disabled} />
+            <span>
+              <strong>${escapeHtml(project.name)}</strong>
+              <small>${escapeHtml(project.client || project.id)}</small>
+            </span>
+          </label>
+        `).join("") || `<span class="muted">No projects available.</span>`}
+      </div>
+    </div>
+  `;
+}
+
+function getUserInitials(user, isNew = false) {
+  if (isNew) return "+";
+  const text = String(user.name || user.username || "U").trim();
+  const parts = text.split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : text.slice(0, 2)).toUpperCase();
+}
+
+function formatRoleLabel(role) {
+  return {
+    admin: "Admin",
+    manager: "Manager",
+    engineer: "Engineer",
+    field: "Field"
+  }[role] || role || "Field";
+}
+
+function getUserProjectSummary(user) {
+  if ((user.role || "field") === "admin") return "All projects";
+  const names = (user.projectIds || [])
+    .map((id) => state.data.projects.find((project) => project.id === id)?.name || id)
+    .filter(Boolean);
+  return names.length ? names.join(", ") : "No project access";
 }
 
 function isUserLocked(user) {
@@ -3128,8 +3273,18 @@ function bindEvents() {
   document.querySelectorAll("[data-user-editor]").forEach((form) => {
     form.addEventListener("submit", saveUser);
   });
+  document.querySelectorAll("[data-focus-new-user]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = document.querySelector(".new-user-card input[name='name']");
+      field?.focus();
+      field?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
   document.querySelectorAll("[data-unlock-user]").forEach((button) => {
     button.addEventListener("click", () => unlockUser(button.dataset.unlockUser));
+  });
+  document.querySelectorAll("[data-delete-user]").forEach((button) => {
+    button.addEventListener("click", () => deleteUser(button.dataset.deleteUser, button.dataset.deleteUserName));
   });
   document.querySelectorAll("[data-audit-filter]").forEach((field) => {
     if (field.dataset.auditFilter === "q") {
@@ -3955,18 +4110,48 @@ async function saveUser(event) {
   event.preventDefault();
   if (!canManageUsers()) return;
   const form = event.currentTarget;
-  const payload = Object.fromEntries(new FormData(form).entries());
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+  const isNew = !form.dataset.userEditor;
   if (form.dataset.userEditor) payload.id = form.dataset.userEditor;
-  payload.active = payload.active !== "false";
-  payload.mustChangePassword = payload.mustChangePassword === "true";
-  payload.projectIds = String(payload.projectIds || "").split(",").map((item) => item.trim()).filter(Boolean);
+  payload.active = formData.get("active") === "true";
+  payload.mustChangePassword = formData.get("mustChangePassword") === "true";
+  payload.projectIds = formData.getAll("projectIds").map((item) => String(item).trim()).filter(Boolean);
+  const missing = [];
+  if (!String(payload.name || "").trim()) missing.push({ field: "name", label: "name" });
+  if (!String(payload.username || "").trim()) missing.push({ field: "username", label: "username" });
+  if (isNew && !String(payload.password || "").trim()) missing.push({ field: "password", label: "temporary password" });
+  if (missing.length) {
+    const first = missing[0];
+    form.querySelector(`[name="${first.field}"]`)?.focus();
+    flash(`Please enter ${missing.map((item) => item.label).join(", ")}`);
+    form.classList.add("needs-attention");
+    window.setTimeout(() => form.classList.remove("needs-attention"), 1200);
+    return;
+  }
   if (!payload.password) delete payload.password;
   try {
     const response = await apiPost("/admin/user", payload);
     setData(response);
     flash(t("updateSuccess"));
   } catch (error) {
-    flash(error.status === 403 ? "Permission denied" : t("serverOffline"));
+    flash(error.status === 403 ? "Permission denied" : error.message || t("serverOffline"));
+  }
+}
+
+async function deleteUser(userId, label = "this user") {
+  if (!canManageUsers() || !userId) return;
+  if (state.currentUser?.id === userId) {
+    flash("You cannot delete your own account");
+    return;
+  }
+  if (!window.confirm(`Delete ${label}? This will remove their login access and active sessions.`)) return;
+  try {
+    const response = await apiPost("/admin/user/delete", { id: userId });
+    setData(response);
+    flash("User deleted");
+  } catch (error) {
+    flash(error.status === 403 ? "Permission denied" : error.message || t("serverOffline"));
   }
 }
 

@@ -250,14 +250,28 @@ export async function updatePostgresProject(user, body) {
 export async function upsertPostgresUser(adminUser, body) {
   const prisma = getPrisma();
   const result = await prisma.$transaction(async (tx) => {
+    const requestedId = String(body.id || "").trim();
     const username = String(body.username || "").trim().toLowerCase();
     const name = String(body.name || username || "User").trim();
     const role = roles.has(body.role) ? body.role : "field";
     const projectIds = await normalizeProjectIds(tx, body.projectIds);
+    const active = body.active === false || body.active === "false" ? false : true;
     if (!username) return mutationError(400, "Username is required.");
-    const existing = await tx.user.findFirst({
-      where: { OR: [{ id: String(body.id || "") }, { username }] }
-    });
+    const [existingById, existingByUsername] = await Promise.all([
+      requestedId ? tx.user.findUnique({ where: { id: requestedId } }) : null,
+      tx.user.findUnique({ where: { username } })
+    ]);
+    if (existingById && existingByUsername && existingById.id !== existingByUsername.id) {
+      return mutationError(409, "Username is already used by another user.");
+    }
+    const existing = existingById || existingByUsername;
+    if (existing?.id === adminUser?.id && (role !== "admin" || !active)) {
+      return mutationError(400, "You cannot remove your own admin access.");
+    }
+    if (existing?.role === "admin" && (!active || role !== "admin")) {
+      const activeAdminCount = await tx.user.count({ where: { role: "admin", active: true } });
+      if (activeAdminCount <= 1) return mutationError(400, "At least one active admin account is required.");
+    }
     const userId = existing?.id || createImportedId("u");
     const passwordHash = body.password
       ? bcrypt.hashSync(String(body.password), bcryptRounds)
@@ -270,7 +284,7 @@ export async function upsertPostgresUser(adminUser, body) {
         username,
         name,
         role,
-        active: body.active === false || body.active === "false" ? false : true,
+        active,
         passwordHash,
         mustChangePassword,
         failedLoginCount: 0,
@@ -281,7 +295,7 @@ export async function upsertPostgresUser(adminUser, body) {
         username,
         name,
         role,
-        active: body.active === false || body.active === "false" ? false : true,
+        active,
         passwordHash,
         mustChangePassword,
         ...(body.password ? { failedLoginCount: 0, lockedUntil: null, passwordChangedAt: new Date() } : {})
@@ -294,7 +308,33 @@ export async function upsertPostgresUser(adminUser, body) {
         skipDuplicates: true
       });
     }
-    await tx.auditLog.create({ data: auditData(adminUser, existing ? "user.update" : "user.create", "user", userId, { role, active: body.active !== false }) });
+    await tx.auditLog.create({ data: auditData(adminUser, existing ? "user.update" : "user.create", "user", userId, { role, active }) });
+    return { ok: true };
+  });
+  return result?.mutationError ? result : { data: await getPostgresBootstrapForUser(adminUser) };
+}
+
+export async function deletePostgresUser(adminUser, userId) {
+  const prisma = getPrisma();
+  const result = await prisma.$transaction(async (tx) => {
+    const id = String(userId || "").trim();
+    if (!id) return mutationError(400, "User id is required.");
+    const target = await tx.user.findUnique({ where: { id } });
+    if (!target) return mutationError(404, "User not found.");
+    if (target.id === adminUser?.id) return mutationError(400, "You cannot delete your own account.");
+    if (target.role === "admin" && target.active) {
+      const activeAdminCount = await tx.user.count({ where: { role: "admin", active: true } });
+      if (activeAdminCount <= 1) return mutationError(400, "At least one active admin account is required.");
+    }
+    await tx.session.deleteMany({ where: { userId: id } });
+    await tx.auditLog.create({
+      data: auditData(adminUser, "user.delete", "user", id, {
+        username: target.username,
+        role: target.role,
+        active: target.active
+      })
+    });
+    await tx.user.delete({ where: { id } });
     return { ok: true };
   });
   return result?.mutationError ? result : { data: await getPostgresBootstrapForUser(adminUser) };
