@@ -480,8 +480,9 @@ async function restoreSession() {
     const response = await apiGet("/auth/me");
     setData(response.data);
     setState({ authToken: "cookie", currentUser: response.user, serverOnline: true }, false);
-  } catch {
-    setState({ authToken: "", currentUser: null, serverOnline: false }, false);
+  } catch (error) {
+    const apiResponded = [401, 403].includes(Number(error?.status));
+    setState({ authToken: "", currentUser: null, serverOnline: apiResponded }, false);
   }
 }
 
