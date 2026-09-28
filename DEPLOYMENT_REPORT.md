@@ -13,6 +13,19 @@
 
 Production was not cut over. The staging service is isolated so ELV and BMS PM WEB can continue to run in parallel.
 
+## Latest Staging Verification
+
+- Verified: 2026-09-28 (Asia/Shanghai)
+- Local source: `main` at `6e00048` (`Add Codex project guidance`); local `main` is six commits ahead of `origin/main`.
+- Local production build (`vite build` using the bundled Node runtime): passed.
+- HTTP and HTTPS homepages: 200; `/api/ready` on both staging URLs: 200.
+- The JS and CSS asset names served over HTTP and HTTPS match the local production build: `index-DK-SQgpr.js` and `index-DAAgGVNQ.css`.
+- SHA-256 checks matched for `src/modules/ui.js`, `src/styles.css`, `server/index.js`, `server/postgresRepository.js`, `prisma/schema.prisma`, and the deployed IIS `dist/web.config`.
+- Staging admin login: passed. Authenticated bootstrap: 2 projects, 9 equipment items, 21 points, and 19 records.
+- The staging share on port 445 was reachable. Since the application files already matched, this verification did not copy files or restart the API task.
+- BMS front door on ports 80 and 443 returned 200. Direct TCP access to 3002 was unavailable from this workstation; no BMS service or configuration was changed.
+- Media upload, offline reconnect sync, and the 100-user load test were not repeated during this verification. See the dated validation results above for the previous deployment test run.
+
 ## Server Environment
 
 | Component | Value |
