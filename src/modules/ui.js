@@ -31,6 +31,10 @@ const DEMO_ACCOUNTS =
       ]
     : [];
 const SHOW_DEMO_ACCOUNTS = DEMO_ACCOUNTS.length > 0;
+// Drafts belong to a point/record, not to a DOM node that a sync render can replace.
+const fieldNoteDrafts = new Map();
+const fieldFileDrafts = new Map();
+const attachmentSaves = new Set();
 
 const dictionary = {
   en: {
@@ -114,11 +118,11 @@ const dictionary = {
     equipmentType: "Equipment Type",
     pointType: "Point Type",
     status: "Status",
-    navDashboard: "Dashboard",
-    navData: "Data Table",
-    navImport: "Import & Sync",
+    navDashboard: "Overview",
+    navData: "Inspections",
+    navImport: "Import",
     navIssues: "Issues",
-    navPeople: "People",
+    navPeople: "Team",
     navMedia: "Drawings & Media",
     mediaLibrary: "Equipment Media Library",
     mediaType: "Media Type",
@@ -258,11 +262,11 @@ const dictionary = {
     equipmentType: "設備類型",
     pointType: "點位類型",
     status: "狀態",
-    navDashboard: "儀表板",
-    navData: "資料表",
-    navImport: "導入與同步",
+    navDashboard: "項目總覽",
+    navData: "驗收記錄",
+    navImport: "匯入資料",
     navIssues: "問題",
-    navPeople: "人員",
+    navPeople: "團隊與權限",
     navMedia: "圖紙與媒體",
     mediaLibrary: "設備媒體庫",
     mediaType: "媒體類型",
@@ -391,12 +395,14 @@ function defaultState() {
     fieldMobilePath: {},
     fieldSearch: "",
     fieldSearchDraft: "",
+    disclosures: {},
     toast: "",
     conflicts: [],
     adminProjectId: "p1",
     adminEquipmentId: "",
     adminSearch: "",
     adminPage: "dashboard",
+    adminTableMode: "list",
     adminTreeSelection: null,
     collapsedTreeNodes: [],
     adminTreeWidth: null,
@@ -502,6 +508,18 @@ function t(key) {
   return dictionary[state.lang][key] || key;
 }
 
+function uiText(en, zh) {
+  return state.lang === "zh" ? zh : en;
+}
+
+function disclosureOpen(key, fallback = false) {
+  return (state.disclosures?.[key] ?? fallback) ? "open" : "";
+}
+
+function renderPageHeading(title, description, action = "") {
+  return `<div class="page-heading"><div><h2>${title}</h2><p>${description}</p></div>${action}</div>`;
+}
+
 function setState(patch, shouldRender = true) {
   state = { ...state, ...patch };
   saveState();
@@ -543,8 +561,9 @@ function normalizeSelection(data) {
 }
 
 function render() {
+  document.documentElement.lang = state.lang === "zh" ? "zh-Hant" : "en";
   document.querySelector("#app").innerHTML = `
-    <main class="shell">
+    <main class="shell workspace-shell ${state.view}-workspace">
       ${renderTopbar()}
       ${state.authToken ? (state.currentUser?.mustChangePassword ? renderPasswordChange() : (state.view === "field" ? renderField() : renderAdmin())) : renderLogin()}
       ${renderIssueModal()}
@@ -552,7 +571,7 @@ function render() {
       ${renderMediaUploadModal()}
       ${renderSyncQueueModal()}
       ${renderConflictModal()}
-      <div class="toast ${state.toast ? "show" : ""}">${escapeHtml(state.toast)}</div>
+      <div class="toast ${state.toast ? "show" : ""}" role="status" aria-live="polite">${escapeHtml(state.toast)}</div>
     </main>
   `;
   bindEvents();
@@ -630,33 +649,40 @@ function renderTopbar() {
   const isOnline = navigator.onLine && state.serverOnline;
   const retryWait = getSyncRetryWaitSeconds();
   const syncText = pendingSync
-    ? (isOnline ? `Syncing (${pendingSync})${retryWait ? ` - retry in ${retryWait}s` : "..."}` : `Offline: ${pendingSync} Pending`)
-    : t("synced");
+    ? uiText(`${pendingSync} waiting to sync${retryWait ? ` · retry in ${retryWait}s` : ""}`, `${pendingSync} 筆待同步`)
+    : (isOnline ? t("synced") : uiText("Saved on this device", "資料保存在此裝置"));
   const syncTag = pendingSync ? "button" : "span";
   const syncAction = pendingSync ? `type="button" data-sync-queue-toggle title="View sync queue"` : "";
   const user = state.currentUser;
   return `
-    <header class="topbar">
-      <div class="topbar-brand">
-        <div class="brand-row"><span class="logo-mark">${t("logoText")}</span><h1>${t("appName")}</h1></div>
-      </div>
-      ${state.view === "admin" && state.authToken ? `<nav class="top-nav">${renderAdminNav()}</nav>` : ""}
-      <div class="topbar-actions">
-        ${user ? `<span class="user-pill"><strong>${escapeHtml(user.name || user.username)}</strong><small>${escapeHtml(user.role)}</small></span>` : ""}
-        <${syncTag} class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}" ${syncAction}>
-          <i></i>
-          <span>
-            <strong>${isOnline ? t("online") : t("offline")}</strong>
-            <small>${syncText}</small>
-          </span>
-        </${syncTag}>
-        <div class="actions">
-          <button class="icon-btn" data-action="toggle-lang" title="${t("bilingual")}">${state.lang === "en" ? "EN" : "ZH"}</button>
-          ${state.authToken ? `<button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field">${t("field")}</button>` : ""}
-          ${state.authToken && canUseAdminView() ? `<button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin">${t("admin")}</button>` : ""}
-          ${state.authToken ? `<button class="icon-btn" data-action="logout" title="Logout">Logout</button>` : ""}
+    <header class="workspace-header">
+      <div class="workspace-header-main">
+        <div class="workspace-brand"><span class="logo-mark">ELV</span><h1>${uiText("Project Acceptance", "項目驗收")}</h1></div>
+        ${state.authToken && canUseAdminView() ? `
+          <nav class="workspace-modes" aria-label="${uiText("Workspace", "工作模式")}">
+            <button class="mode-btn ${state.view === "admin" ? "active" : ""}" data-view="admin" aria-pressed="${state.view === "admin"}">${uiText("Management", "項目管理")}</button>
+            <button class="mode-btn ${state.view === "field" ? "active" : ""}" data-view="field" aria-pressed="${state.view === "field"}">${uiText("Field inspection", "現場驗收")}</button>
+          </nav>` : ""}
+        <div class="workspace-tools">
+          <${syncTag} class="sync-pill ${isOnline ? "online" : "offline"} ${pendingSync ? "pending-sync" : ""}" ${syncAction}>
+            <i aria-hidden="true"></i>
+            <span><strong>${isOnline ? t("online") : t("offline")}</strong><small>${syncText}</small></span>
+          </${syncTag}>
+          ${user ? `
+            <details class="account-menu">
+              <summary aria-label="${uiText("Account menu", "帳戶選單")}">
+                <span class="account-avatar">${escapeHtml(getUserInitials(user))}</span>
+                <span class="account-name">${escapeHtml(user.name || user.username)}</span><span aria-hidden="true">⌄</span>
+              </summary>
+              <div class="account-popover">
+                <strong>${escapeHtml(user.name || user.username)}</strong><small>${escapeHtml(formatRoleLabel(user.role))}</small>
+                <button class="icon-btn" data-action="toggle-lang">${state.lang === "en" ? "切換至中文" : "Switch to English"}</button>
+                <button class="icon-btn" data-action="logout">${uiText("Sign out", "登出")}</button>
+              </div>
+            </details>` : `<button class="icon-btn" data-action="toggle-lang">${state.lang === "en" ? "中文" : "English"}</button>`}
         </div>
       </div>
+      ${state.view === "admin" && state.authToken ? `<nav class="workspace-nav" aria-label="${uiText("Management pages", "管理頁面")}">${renderAdminNav()}</nav>` : ""}
     </header>
   `;
 }
@@ -666,9 +692,9 @@ function renderAdminNav() {
     ["dashboard", t("navDashboard"), ["admin", "manager", "engineer"]],
     ["data", t("navData"), ["admin", "manager", "engineer"]],
     ["media", t("navMedia"), ["admin", "manager", "engineer"]],
-    ["import", t("navImport"), ["admin", "manager"]],
     ["issues", t("navIssues"), ["admin", "manager", "engineer"]],
-    ["people", t("navPeople"), ["admin", "manager", "engineer"]]
+    ["people", t("navPeople"), ["admin", "manager", "engineer"]],
+    ["import", t("navImport"), ["admin", "manager"]]
   ];
   return pages.filter(([, , roles]) => hasRole(roles)).map(([page, label]) => renderAdminNavItem(page, label)).join("");
 }
@@ -696,42 +722,20 @@ function renderField() {
 }
 
 function renderFieldCommandBar() {
-  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
-  const records = equipment ? state.data.records.filter((record) => record.equipmentId === equipment.id) : [];
-  const stats = getStats(records);
-  const openCount = stats.pending + stats.failed + stats.rectification;
   const searchValue = state.fieldSearchDraft ?? state.fieldSearch ?? "";
-  const path = equipment ? getFieldMobileBreadcrumbItems({ ...getFieldMobilePathForEquipment(equipment), equipment: equipment.name }) : [];
-  const assigneeName = state.currentUser?.name || state.currentUser?.username || "";
-  const myOpen = assigneeName
-    ? state.data.records.filter((record) => record.assignee === assigneeName && !["passed", "closed"].includes(record.status)).length
-    : 0;
   return `
     <section class="field-command-bar">
       <div class="field-command-main">
-        <p class="eyebrow">Field Workbench</p>
-        <h2>${escapeHtml(equipment?.name || t("equipment"))}</h2>
-        <div class="field-route-line">
-          ${path.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("") || `<span>Select a route to start</span>`}
-        </div>
+        <h2>${uiText("Field inspection", "現場驗收")}</h2>
+        <p>${uiText("Find equipment. Check each point. Add evidence when needed.", "找到設備，逐點驗收，按需要附上照片。")}</p>
       </div>
       <label class="field-search-control">
-        <span>Search equipment / point / location</span>
-        <input data-field-search value="${escapeHtml(searchValue)}" placeholder="${t("search")}" autocomplete="off" />
-        ${searchValue ? `<button type="button" data-field-search-clear aria-label="Clear field search">Clear</button>` : ""}
+        <span>${uiText("Find equipment", "查找設備")}</span>
+        <input data-field-search value="${escapeHtml(searchValue)}" placeholder="${uiText("Equipment, point or location…", "輸入設備、點位或位置…")}" autocomplete="off" />
+        ${searchValue ? `<button type="button" data-field-search-clear aria-label="${uiText("Clear search", "清除搜尋")}">${uiText("Clear", "清除")}</button>` : ""}
       </label>
-      <div class="field-kpi-strip" aria-label="Current field task summary">
-        ${fieldKpi("Open", openCount)}
-        ${fieldKpi(t("failed"), stats.failed + stats.rectification)}
-        ${fieldKpi(t("completion"), `${stats.completion}%`)}
-        ${fieldKpi("Mine", myOpen)}
-      </div>
     </section>
   `;
-}
-
-function fieldKpi(label, value) {
-  return `<span class="field-kpi"><strong>${escapeHtml(String(value))}</strong><small>${escapeHtml(label)}</small></span>`;
 }
 
 function renderFieldTree() {
@@ -740,7 +744,7 @@ function renderFieldTree() {
     <div class="field-sidebar-tools">
       <div>
         <div class="section-title">${search ? "Search Results" : t("treeView")}</div>
-        <p>${search ? `Matching "${escapeHtml(search)}"` : "Site route, simplified for field navigation."}</p>
+        <p>${search ? `${uiText("Matching", "搜尋")} "${escapeHtml(search)}"` : uiText("Choose equipment by location.", "按位置選擇設備。")}</p>
       </div>
       ${renderFieldSidebarSummary()}
     </div>
@@ -833,28 +837,18 @@ function renderFieldMobileDrill() {
 
   const search = getFieldSearchTerm();
   const options = search ? getFieldSearchOptions(search) : getFieldMobileOptions(level, path);
-  const step = getFieldMobileStepInfo(level);
-  const scopeRecords = search ? getRecordsForFieldSearch(search) : getRecordsForFieldMobileScope(path);
   return `
     <div class="mobile-drill-shell">
       <div class="mobile-drill-nav-card">
         <div class="mobile-drill-topline">
           ${renderFieldMobileBackButton(level, path)}
-          <span class="mobile-step-pill">${search ? "Search" : `Step ${step.current}/${step.total}`}</span>
+          <span class="mobile-step-pill">${options.length} ${uiText("options", "個選項")}</span>
         </div>
         <div class="mobile-current-level">
-          <p class="eyebrow">${search ? "Fast find" : "Now selecting"}</p>
           <div class="section-title">${search ? "Search Results" : getFieldMobilePrompt(level)}</div>
-          <p>${search ? `Showing equipment that matches "${escapeHtml(search)}".` : getFieldMobileContext(level, path)}</p>
-        </div>
-        ${renderFieldMobileScopeStats(scopeRecords)}
-        <div class="mobile-drill-meta">
-          <span>${options.length} options</span>
-          <span>${search ? "Tap equipment to open checklist" : getFieldMobileTitle(level)}</span>
         </div>
       </div>
-      ${search ? "" : renderFieldMobileStepper(level)}
-      ${renderFieldMobileBreadcrumb(path)}
+      ${level === "project" || search ? "" : renderFieldMobileBreadcrumb(path)}
       <div class="mobile-drill-list">
         ${options.map((item) => renderFieldMobileChoice(item)).join("") || `<div class="empty small">${t("noEquipment")}</div>`}
       </div>
@@ -874,37 +868,22 @@ function renderFieldMobileScopeStats(records) {
 }
 
 function renderFieldMobileDetailNav() {
-  const equipment = state.data.equipment.find((item) => item.id === state.selectedEquipmentId);
   const path = state.fieldMobilePath || {};
-  const step = getFieldMobileStepInfo("equipment");
   return `
     <div class="mobile-drill-nav-card detail-nav">
-      <div class="mobile-drill-topline">
-        ${renderFieldMobileBackButton("detail", path)}
-        <span class="mobile-step-pill">Step ${step.current}/${step.total}</span>
-      </div>
-      <div class="mobile-current-level">
-        <p class="eyebrow">${t("selectedEquipment")}</p>
-        <div class="section-title">${escapeHtml(equipment?.name || t("equipment"))}</div>
-        <p>Review points, comments, photos and acceptance status.</p>
-      </div>
+      ${renderFieldMobileBackButton("detail", path)}
     </div>
-    ${renderFieldMobileBreadcrumb({ projectId: state.selectedProjectId, ...path, team: state.selectedTeam, equipment: equipment?.name })}
   `;
 }
 
 function renderFieldMobileBackButton(level, path) {
   if (level === "project") {
-    return `
-      <div class="mobile-level-label">
-        <span><small>Start level</small><strong>${t("project")}</strong></span>
-      </div>
-    `;
+    return "";
   }
   return `
     <button class="mobile-back-action" data-field-mobile-back>
       <span class="mobile-back-arrow">&larr;</span>
-      <span><small>Back to</small><strong>${escapeHtml(getFieldMobileBackTarget(level, path))}</strong></span>
+      <span>${uiText("Back to", "返回")} ${escapeHtml(getFieldMobileBackTarget(level, path))}</span>
     </button>
   `;
 }
@@ -1285,17 +1264,22 @@ function renderFieldOperation() {
   if (!equipment) return `<div class="empty">${t("noEquipment")}</div>`;
   const records = state.data.records.filter((record) => record.equipmentId === equipment.id);
   const points = state.data.points.filter((point) => point.equipmentId === equipment.id);
-  const selectedRecord = records.find((record) => record.id === state.selectedRecordId) || records[0];
+  const stats = getStats(records);
+  const route = getFieldMobileBreadcrumbItems(getFieldMobilePathForEquipment(equipment));
   return `
     <div class="field-operation">
       <div class="form-head">
         <div>
-          <p class="eyebrow">${t("selectedEquipment")}</p>
           <h2>${escapeHtml(equipment.name)}</h2>
+          <p class="equipment-route">${route.map(escapeHtml).join(" / ")}</p>
         </div>
         <span class="badge ${equipment.status}">${statusLabel(equipment.status)}</span>
       </div>
-      ${renderQuickStats(records)}
+      <div class="inspection-progress">
+        <span>${stats.passed}/${stats.total} ${uiText("passed", "已通過")}</span>
+        <progress value="${stats.completion}" max="100" aria-label="${t("completion")}">${stats.completion}%</progress>
+        <strong>${stats.completion}%</strong>
+      </div>
       <datalist id="comment-suggestions">${getCommentSuggestions().map((comment) => `<option value="${escapeHtml(comment)}"></option>`).join("")}</datalist>
       <div class="point-action-list">
         ${points.map((point) => renderPointActionRow(point)).join("")}
@@ -1305,30 +1289,38 @@ function renderFieldOperation() {
           <small>${escapeHtml(equipment.name)}</small>
         </button>
       </div>
-      ${selectedRecord ? renderAttachmentDock(selectedRecord) : ""}
     </div>
   `;
 }
 
 function renderPointActionRow(point) {
   const record = state.data.records.find((item) => item.pointId === point.id);
-  const isSelected = record?.id === state.selectedRecordId;
+  const isSelected = point.id === state.selectedPointId;
+  const resultLabels = { Pass: uiText("Pass", "通過"), Fail: uiText("Fail", "不通過"), "N/A": uiText("N/A", "不適用") };
   return `
     <div class="point-action-row ${isSelected ? "active" : ""}">
-      <button class="point-main" data-point="${point.id}">
-        <strong>${escapeHtml(point.name)}</strong>
-        <span>${escapeHtml(point.type)} / ${t("reference")}: ${escapeHtml(point.reference || "-")}</span>
+      <button class="point-main" data-point="${point.id}" aria-expanded="${isSelected}" aria-controls="inspection-${point.id}">
+        <span class="point-heading"><strong>${escapeHtml(point.name)}</strong><small>${escapeHtml(point.type)} · ${t("reference")}: ${escapeHtml(point.reference || "-")}</small></span>
+        <span class="badge ${record?.status || point.status}">${statusLabel(record?.status || point.status)}</span>
+        <span class="point-disclosure-hint">${isSelected ? uiText("In progress", "正在驗收") : uiText("Inspect", "驗收")} <span aria-hidden="true">${isSelected ? "−" : "+"}</span></span>
       </button>
-      <span class="badge ${record?.status || point.status}">${statusLabel(record?.status || point.status)}</span>
-      <div class="quick-actions">
-        ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost compact" data-quick-result="${result}" data-record="${record?.id || ""}" data-point-id="${point.id}">${result}</button>`).join("")}
-        <button class="ghost compact" data-comment-record="${record?.id || ""}" ${record ? "" : "disabled"}>${t("addComment")}</button>
-        <button class="ghost compact" data-edit-point="${point.id}">${t("editPoint")}</button>
+      <div id="inspection-${point.id}" class="point-inspection" ${isSelected ? "" : "hidden"}>
+      ${isSelected ? `
+        <div class="inspection-result-head"><strong>${uiText("Inspection result", "驗收結果")}</strong><small>${uiText("Results save on selection. Save notes and files separately.", "選擇結果即保存；備註與附件請分別保存。")}</small></div>
+        <div class="quick-actions" role="group" aria-label="${uiText("Inspection result", "驗收結果")}">
+          ${["Pass", "Fail", "N/A"].map((result) => `<button class="ghost result-choice ${record?.result === result ? "selected" : ""}" data-quick-result="${result}" data-point-id="${point.id}" data-result-record="${record?.id || ""}" aria-pressed="${record?.result === result}">${resultLabels[result]}</button>`).join("")}
+        </div>
+        <label class="inspection-notes">${uiText("Notes", "驗收備註")}
+          <textarea rows="2" data-comment-input="${record?.id || ""}" data-comment-point="${point.id}" placeholder="${uiText("Add observations or explain a failed result…", "記錄觀察結果，或說明未通過的原因…")}">${escapeHtml(fieldNoteDrafts.get(point.id) ?? record?.comments ?? "")}</textarea>
+        </label>
+        <div class="note-save-row"><span data-note-status aria-live="polite">${fieldNoteDrafts.has(point.id) ? uiText("Unsaved notes", "備註尚未保存") : ""}</span><button class="ghost" type="button" data-save-note="${point.id}" ${fieldNoteDrafts.has(point.id) ? "" : "disabled"}>${uiText("Save notes", "保存備註")}</button></div>
+        ${record ? renderAttachmentDock(record) : ""}
+        <details class="point-definition">
+          <summary>${uiText("Edit point details", "編輯點位資料")}</summary>
+          ${renderFieldPointEditor(point, true)}
+        </details>
+      ` : ""}
       </div>
-      <div class="comment-panel ${isSelected ? "show" : ""}">
-        <textarea rows="2" list="comment-suggestions" data-comment-input="${record?.id || ""}" placeholder="${t("commentPlaceholder")}">${escapeHtml(record?.comments || "")}</textarea>
-      </div>
-      ${renderFieldPointEditor(point, isSelected)}
     </div>
   `;
 }
@@ -1336,9 +1328,9 @@ function renderPointActionRow(point) {
 function renderFieldPointEditor(point, isSelected) {
   return `
     <form class="field-point-editor ${isSelected ? "show" : ""}" data-field-point-editor data-id="${point.id}" data-equipment-id="${point.equipmentId}">
-      <input name="name" value="${escapeHtml(point.name)}" placeholder="${t("pointName")}" />
-      <input name="type" value="${escapeHtml(point.type)}" placeholder="${t("pointType")}" />
-      <input name="reference" value="${escapeHtml(point.reference || "")}" placeholder="${t("reference")}" />
+      <label>${t("pointName")}<input name="name" value="${escapeHtml(point.name)}" required /></label>
+      <label>${t("pointType")}<input name="type" value="${escapeHtml(point.type)}" /></label>
+      <label>${t("reference")}<input name="reference" value="${escapeHtml(point.reference || "")}" /></label>
       <input name="status" type="hidden" value="${escapeHtml(point.status || "pending")}" />
       <button class="ghost compact" type="submit">${t("saveChanges")}</button>
     </form>
@@ -1479,17 +1471,18 @@ function formatUploadError(error) {
 function renderAttachmentDock(record) {
   return `
     <form class="attachment-dock" data-form="${record.id}">
-      <label class="file-button">${t("camera")}
-        <input name="camera" type="file" accept="image/*" capture="environment" multiple />
-      </label>
-      <label class="file-button">${t("gallery")}
-        <input name="attachments" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple />
-      </label>
-      <button type="button" class="ghost" data-action="translate">${t("translate")}</button>
-      <button class="primary" type="submit">${t("save")}</button>
-      <div class="photos">
-        ${(record.photos || []).map(renderAttachmentThumb).join("")}
+      <div class="attachment-actions">
+        <label class="file-button">${t("camera")}
+          <input name="camera" type="file" accept="image/*" capture="environment" multiple />
+        </label>
+        <label class="file-button">${uiText("Choose files", "選擇附件")}
+          <input name="attachments" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple />
+        </label>
+        <button class="primary" type="submit" disabled>${uiText("Save attachments", "保存附件")}</button>
+        <button type="button" class="text-button" data-action="translate">${t("translate")}</button>
       </div>
+      <output class="attachment-selection" aria-live="polite">${uiText("No new files selected", "尚未選擇新附件")}</output>
+      ${record.photos?.length ? `<div class="photos">${record.photos.map(renderAttachmentThumb).join("")}</div>` : ""}
     </form>
   `;
 }
@@ -1579,11 +1572,18 @@ function renderInspectionForm(record) {
 }
 
 function renderAdmin() {
-  return `<section class="admin-main">${renderAdminPage()}</section>`;
+  const descriptions = {
+    data: [t("navData"), uiText("Choose a project, narrow the location, then update inspection records.", "選擇項目和位置，再查看或更新驗收記錄。")],
+    media: [t("navMedia"), uiText("Find drawings and inspection evidence by equipment.", "按設備查找圖紙、照片和驗收附件。")],
+    issues: [t("navIssues"), uiText("Review outstanding work and follow up with the assigned person.", "查看待處理事項，跟進負責人及整改進度。")],
+    import: [t("navImport"), uiText("Upload a spreadsheet, review the preview, then confirm the import.", "上傳試算表，確認預覽內容後再匯入。")]
+  };
+  const heading = descriptions[state.adminPage];
+  return `<section class="admin-main">${heading ? renderPageHeading(...heading) : ""}${renderAdminPage()}</section>`;
 }
 
 function renderAdminNavItem(page, label) {
-  return `<button class="admin-nav-item ${state.adminPage === page ? "active" : ""}" data-admin-page="${page}">${label}</button>`;
+  return `<button class="admin-nav-item ${state.adminPage === page ? "active" : ""}" data-admin-page="${page}" ${state.adminPage === page ? 'aria-current="page"' : ""}>${label}</button>`;
 }
 
 function renderAdminPage() {
@@ -1595,15 +1595,17 @@ function renderAdminPage() {
     return `
       <section class="data-workbench" style="--tree-width:${treeWidth}px">
         <aside class="panel tree-panel">
-          <div class="section-title">${t("treeView")}</div>
-          ${renderLocationTree()}
+          ${renderProjectSelectorCard()}
+          <details class="location-disclosure" data-disclosure="locations" ${disclosureOpen("locations", window.matchMedia("(min-width: 861px)").matches)}>
+            <summary>${uiText("Browse locations", "按位置篩選")}</summary>
+            ${renderLocationTree()}
+          </details>
           <span class="tree-resize-handle" data-tree-resize title="Resize tree"></span>
           ${state.adminTreeWidthManual ? `<button class="tree-auto-width" data-tree-auto-width title="Auto fit tree width">Auto</button>` : ""}
         </aside>
         <section class="data-stack">
-          ${renderProjectSelectorCard()}
           <section class="panel data-panel">
-            <div class="section-title">${t("dataTable")}</div>
+            <div class="data-panel-heading"><div class="section-title">${uiText("Inspection records", "驗收記錄")}</div><div class="data-view-actions"><span>${getAdminRows().length} ${uiText("records", "筆記錄")}</span><button class="ghost compact" data-toggle-data-grid>${state.adminTableMode === "grid" ? uiText("Simple list", "簡明清單") : uiText("Spreadsheet view", "進階表格")}</button></div></div>
             ${renderAdminContextBar()}
             ${renderAdminFilters()}
             ${renderDataTable()}
@@ -1633,13 +1635,14 @@ function renderAdminPage() {
 function renderDashboardHero() {
   const metrics = getDashboardMetrics();
   return `
-    <section class="dashboard-hero">
-      <div>
-        <p class="eyebrow">${t("portfolioHealth")}</p>
-        <h2>${metrics.completion}%</h2>
-        <span>${metrics.passed}/${metrics.total} ${t("inspectedQty")}</span>
+    <section class="overview-summary">
+      ${renderPageHeading(uiText("Project overview", "項目總覽"), uiText("Choose a project to review inspections and outstanding work.", "查看項目進度，繼續驗收或跟進待處理事項。"), `<button class="primary" data-view="field">${uiText("Start field inspection", "開始現場驗收")} <span aria-hidden="true">→</span></button>`)}
+      <div class="overview-progress">
+        <span>${uiText("Overall completion", "整體完成度")} <strong>${metrics.completion}%</strong></span>
+        <progress value="${metrics.completion}" max="100" aria-label="${t("completion")}">${metrics.completion}%</progress>
+        <small>${metrics.passed}/${metrics.total} ${uiText("inspections passed", "項驗收已通過")}</small>
       </div>
-      <div class="hero-kpis">
+      <div class="overview-metrics" aria-label="${uiText("Filter overview", "篩選總覽")}">
         ${renderKpi(t("totalProjects"), metrics.projects, "", "projects")}
         ${renderKpi(t("totalEquipment"), metrics.equipment, "", "equipment")}
         ${renderKpi(t("totalPoints"), metrics.points, "", "points")}
@@ -1653,8 +1656,8 @@ function renderDashboardHero() {
 
 function renderKpi(label, value, tone = "", filter = "") {
   const active = filter && state.dashboardFilter === filter ? "active" : "";
-  if (!filter) return `<div class="kpi-card ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
-  return `<button class="kpi-card ${tone} ${active}" data-dashboard-filter="${filter}"><strong>${value}</strong><span>${label}</span></button>`;
+  if (!filter) return `<div class="metric-link ${tone}"><strong>${value}</strong><span>${label}</span></div>`;
+  return `<button class="metric-link ${tone} ${active}" data-dashboard-filter="${filter}" aria-pressed="${Boolean(active)}"><strong>${value}</strong><span>${label}</span></button>`;
 }
 
 function renderDashboardPrimaryPanel() {
@@ -2021,40 +2024,24 @@ function renderPeoplePage() {
   const forcedPasswordUsers = users.filter((user) => user.mustChangePassword).length;
   return `
     <section class="people-page">
-      <section class="panel people-overview">
-        <div>
-          <p class="eyebrow">People & Access</p>
-          <h2>Personnel Management</h2>
-          <span>Manage login accounts, roles, project access, password resets and account lifecycle.</span>
-        </div>
-        <div class="people-kpi-grid">
-          ${renderPeopleKpi("Users", users.length)}
-          ${renderPeopleKpi("Active", activeUsers, "ok")}
-          ${renderPeopleKpi("Locked", lockedUsers, lockedUsers ? "danger" : "")}
-          ${renderPeopleKpi("Must Change", forcedPasswordUsers, forcedPasswordUsers ? "warn" : "")}
-        </div>
-      </section>
-
-      <section class="people-admin-grid">
-        <section class="panel person-stats-panel">
-          <div class="section-title">${t("personStats")}</div>
-          ${renderPersonStats(people)}
-        </section>
-        <section class="panel access-control-panel">
-          ${renderUserManagement()}
-        </section>
-      </section>
-
-      <section class="panel audit-panel people-audit-panel">
-        <div class="section-title">Audit Log</div>
+      ${renderPageHeading(uiText("Team & access", "團隊與權限"), uiText("Review accounts. Open a person to change their access.", "先查看帳戶，展開指定人員後再編輯權限。"), canManageUsers() ? `<button class="primary" data-add-user>+ ${uiText("Add team member", "新增人員")}</button>` : "")}
+      <div class="team-summary">
+        <span><strong>${users.length}</strong> ${uiText("accounts", "個帳戶")}</span>
+        <span><strong>${activeUsers}</strong> ${uiText("active", "個啟用")}</span>
+        ${lockedUsers ? `<span class="has-issues">${lockedUsers} ${uiText("locked", "個已鎖定")}</span>` : ""}
+        ${forcedPasswordUsers ? `<span>${forcedPasswordUsers} ${uiText("require a password change", "個需更改密碼")}</span>` : ""}
+      </div>
+      <section class="panel access-control-panel">${renderUserManagement()}</section>
+      <details class="panel supporting-section" data-disclosure="person-stats" ${disclosureOpen("person-stats")}>
+        <summary>${t("personStats")}<span>${uiText("Inspection workload by person", "查看各人員的驗收進度")}</span></summary>
+        ${renderPersonStats(people)}
+      </details>
+      <details class="panel supporting-section" data-disclosure="audit" ${disclosureOpen("audit")}>
+        <summary>${uiText("Activity log", "操作記錄")}<span>${uiText("Account changes and inspection history", "查看帳戶變更與驗收操作歷史")}</span></summary>
         ${renderAuditLog()}
-      </section>
+      </details>
     </section>
   `;
-}
-
-function renderPeopleKpi(label, value, tone = "") {
-  return `<div class="people-kpi ${tone}"><strong>${value}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
 function renderPersonStats(people) {
@@ -2086,16 +2073,23 @@ function renderUserManagement() {
   });
   return `
     <div class="user-management">
-      <div class="user-management-head">
-        <div>
-          <div class="section-title">Access Control</div>
-          <p class="muted">Add users, edit roles and project access, reset passwords, unlock or remove accounts.</p>
-        </div>
-        <span class="security-badge">${orderedUsers.length} accounts</span>
-      </div>
-      ${canManageUsers() ? renderUserRow({ id: "", username: "", name: "", role: "field", active: true, projectIds: state.data.projects[0] ? [state.data.projects[0].id] : [], mustChangePassword: true }, true) : ""}
+      ${canManageUsers() ? `
+        <details class="new-user-disclosure" data-disclosure="new-user" ${disclosureOpen("new-user")}>
+          <summary>${uiText("New team member", "新增團隊人員")}<span>${uiText("Create a login account", "建立登入帳戶")}</span></summary>
+          ${renderUserRow({ id: "", username: "", name: "", role: "field", active: true, projectIds: state.data.projects[0] ? [state.data.projects[0].id] : [], mustChangePassword: true }, true)}
+        </details>` : ""}
       <div class="user-card-list">
-        ${orderedUsers.map((user) => renderUserRow(user)).join("") || `<div class="empty small">No users found.</div>`}
+        ${orderedUsers.map((user) => `
+          <details class="user-disclosure" data-disclosure="user-${user.id}" ${disclosureOpen(`user-${user.id}`)}>
+            <summary>
+              <span class="account-avatar">${escapeHtml(getUserInitials(user))}</span>
+              <span class="account-row-identity"><strong>${escapeHtml(user.name || user.username)}</strong><small>@${escapeHtml(user.username)} · ${escapeHtml(getUserProjectSummary(user))}</small></span>
+              <span class="role-badge ${escapeHtml(user.role)}">${escapeHtml(formatRoleLabel(user.role))}</span>
+              <span class="security-badge ${isUserLocked(user) || user.active === false ? "danger" : "ok"}">${isUserLocked(user) ? uiText("Locked", "已鎖定") : user.active === false ? uiText("Inactive", "已停用") : uiText("Active", "啟用中")}</span>
+              <span class="account-edit-label">${canManageUsers() ? uiText("Edit", "編輯") : uiText("Details", "詳情")} <span aria-hidden="true">⌄</span></span>
+            </summary>
+            ${renderUserRow(user)}
+          </details>`).join("") || `<div class="empty small">${uiText("No users found.", "尚未有帳戶。")}</div>`}
       </div>
     </div>
   `;
@@ -2106,8 +2100,6 @@ function renderUserRow(user, isNew = false) {
   const locked = isUserLocked(user);
   const active = user.active !== false;
   const isSelf = !isNew && state.currentUser?.id === user.id;
-  const identityTag = isNew ? "button" : "div";
-  const identityAttributes = isNew ? `type="button" data-focus-new-user title="Start adding a team member"` : "";
   const required = isNew ? "required" : "";
   const passwordRequired = isNew ? "required" : "";
   const securityBadges = [
@@ -2116,19 +2108,11 @@ function renderUserRow(user, isNew = false) {
     locked ? `<span class="security-badge danger">Locked</span>` : "",
     Number(user.failedLoginCount || 0) ? `<span class="security-badge">${Number(user.failedLoginCount || 0)} failed</span>` : ""
   ].join("");
-  const projectSummary = getUserProjectSummary(user);
   return `
     <form class="user-card ${isNew ? "new-user-card" : ""} ${active ? "" : "inactive"} ${locked ? "locked" : ""}" data-user-editor="${escapeHtml(user.id || "")}" novalidate>
       <div class="user-card-head">
-        <${identityTag} class="user-identity ${isNew ? "user-identity-button" : ""}" ${identityAttributes}>
-          <span class="user-avatar">${escapeHtml(getUserInitials(user, isNew))}</span>
-          <div>
-            <strong>${escapeHtml(isNew ? "Add team member" : user.name || user.username || "-")}</strong>
-            <small>${escapeHtml(isNew ? "Click here, fill required fields, then press Add User" : `@${user.username || "-"} · ${projectSummary}`)}</small>
-          </div>
-        </${identityTag}>
+        <p class="user-form-intro">${isNew ? uiText("Enter their name, login and temporary password, then select project access.", "填寫姓名、登入名稱與臨時密碼，再設定項目權限。") : uiText("Change account details and project access below.", "在下方修改帳戶資料與項目權限。")}</p>
         <div class="user-card-badges">
-          <span class="role-badge ${escapeHtml(user.role || "field")}">${escapeHtml(formatRoleLabel(user.role || "field"))}</span>
           ${isSelf ? `<span class="security-badge">You</span>` : ""}
         </div>
       </div>
@@ -2310,33 +2294,34 @@ function renderProjectSummary(project) {
   const stats = getStats(records);
   const progressTone = getProjectProgressTone(stats);
   return `
-    <section class="project-card">
+    <section class="project-card project-summary">
       <div class="project-card-head">
         <div class="project-title-block">
-          <p class="eyebrow">${escapeHtml(project.client || "-")}</p>
           <h2>${escapeHtml(project.name)}</h2>
-          <span>${t("projectManager")}: <strong>${escapeHtml(project.manager || "-")}</strong></span>
+          <span>${escapeHtml(project.client || "-")} · ${t("projectManager")}: ${escapeHtml(project.manager || uiText("Unassigned", "尚未指派"))}</span>
         </div>
-        <form data-project-manager="${project.id}" class="manager-popover">
-          <button class="manager-edit-button" type="button" title="${t("updateManager")}" aria-label="${t("updateManager")}">&#9998;</button>
-          <div class="manager-edit-panel">
+        <details class="project-settings">
+          <summary>${uiText("Manager", "負責人")}</summary>
+          <form data-project-manager="${project.id}">
             <label>${t("projectManager")}
               <input name="manager" value="${escapeHtml(project.manager || "")}" placeholder="PM / Engineer" />
             </label>
             <button class="ghost compact" type="submit">${t("saveChanges")}</button>
-          </div>
-        </form>
+          </form>
+        </details>
       </div>
-      <div class="stats wide">
-        ${statCard(t("equipmentQty"), equipment.length)}
-        ${statCard(t("pointCount"), points.length)}
-        ${statCard(t("inspectedQty"), stats.passed)}
-        ${statCard(t("pending"), stats.pending)}
-        ${statCard(t("issueQty"), stats.failed + stats.rectification)}
+      <div class="project-facts">
+        <span><strong>${equipment.length}</strong> ${t("equipmentQty")}</span>
+        <span><strong>${points.length}</strong> ${t("pointCount")}</span>
+        <span><strong>${stats.pending}</strong> ${t("pending")}</span>
+        <span class="${stats.failed + stats.rectification ? "has-issues" : ""}"><strong>${stats.failed + stats.rectification}</strong> ${t("issueQty")}</span>
       </div>
-      <div class="project-progress-line ${progressTone}">
-        <span>${stats.completion}%</span>
-        <div class="mini-progress"><span style="width:${stats.completion}%"></span></div>
+      <div class="project-summary-foot">
+        <div class="project-progress-line ${progressTone}">
+          <span>${stats.completion}%</span>
+          <div class="mini-progress" role="progressbar" aria-label="${t("completion")}" aria-valuenow="${stats.completion}" aria-valuemin="0" aria-valuemax="100"><span style="width:${stats.completion}%"></span></div>
+        </div>
+        <button class="ghost compact" data-open-project="${project.id}">${uiText("View inspections", "查看驗收記錄")} <span aria-hidden="true">→</span></button>
       </div>
     </section>
   `;
@@ -2389,9 +2374,10 @@ function getProjectProgressTone(stats) {
 }
 
 function renderAttentionList() {
-  const records = getDashboardDrilldownRecords().slice(0, 8);
+  const all = getDashboardDrilldownRecords();
+  const records = all.slice(0, 4);
   if (!records.length) return `<div class="empty small">${state.dashboardFilter === "all" ? t("noIssues") : t("noMatchingRecords")}</div>`;
-  return records.map(renderAttentionIssueCard).join("");
+  return records.map(renderAttentionIssueCard).join("") + (all.length > 4 ? `<button class="ghost attention-more" data-admin-page="issues">${uiText("View all outstanding work", "查看所有待處理事項")} →</button>` : "");
 }
 
 function renderAttentionHeader() {
@@ -2466,31 +2452,9 @@ function isRecordOverdue(record) {
 function renderProjectSelectorCard() {
   const activeProjectId = state.adminProjectId || state.selectedProjectId;
   return `
-    <section class="project-selector-card">
-      <div class="project-selector-head">
-        <span>Active Project</span>
-        <strong>${state.data.projects.length} ${t("totalProjects")}</strong>
-      </div>
-      <div class="project-option-grid">
-        ${state.data.projects.map((project) => renderProjectOption(project, activeProjectId)).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function renderProjectOption(project, activeProjectId) {
-  const records = state.data.records.filter((record) => record.projectId === project.id);
-  const equipment = state.data.equipment.filter((item) => item.projectId === project.id);
-  const stats = getStats(records);
-  return `
-    <button class="project-option ${project.id === activeProjectId ? "active" : ""}" data-admin-project="${project.id}">
-      <span>
-        <strong>${escapeHtml(project.name)}</strong>
-        <small>${escapeHtml(project.client || project.manager || "-")}</small>
-      </span>
-      <em>${stats.completion}%</em>
-      <small>${equipment.length} ${t("equipment")} / ${stats.failed + stats.rectification} ${t("issueQty")}</small>
-    </button>
+    <label class="project-picker">${t("project")}
+      <select data-project-picker>${state.data.projects.map((project) => option(project.id, project.name, activeProjectId)).join("")}</select>
+    </label>
   `;
 }
 
@@ -2516,8 +2480,9 @@ function renderAdminContextBar() {
   const segments = getAdminContextSegments();
   return `
     <div class="data-context-bar">
-      <span>Context</span>
+      <span>${uiText("Showing", "目前範圍")}</span>
       <strong>${segments.map((segment) => escapeHtml(segment)).join(" / ")}</strong>
+      ${state.adminTreeSelection || state.adminEquipmentId || state.adminSearch ? `<button class="text-button" data-reset-data-filters>${uiText("Clear filters", "清除篩選")}</button>` : ""}
     </div>
   `;
 }
@@ -2556,7 +2521,7 @@ function getAdminTreeWidth() {
   const projectNode = { type: "project", projectId, label: project?.name || t("allNodes"), children: tree };
   const visibleNodes = collectVisibleTreeNodes(projectNode, 0);
   const estimated = visibleNodes.reduce((width, item) => Math.max(width, estimateTreeNodeWidth(item.node, item.level)), 260);
-  return clampTreeWidth(estimated);
+  return Math.min(320, clampTreeWidth(estimated));
 }
 
 function collectVisibleTreeNodes(node, level) {
@@ -2625,6 +2590,14 @@ function renderTreeNode(node, level, hasChildren = false, collapsed = false) {
 }
 
 function renderDataTable() {
+  const rows = getAdminRows();
+  if (!rows.length) return `<div class="record-empty"><strong>${uiText("No matching records", "沒有符合條件的記錄")}</strong><p>${uiText("Try another search or clear the location and equipment filters.", "請調整搜尋字詞，或清除位置與設備篩選。")}</p><button class="ghost compact" data-reset-data-filters>${uiText("Clear filters", "清除篩選")}</button></div>`;
+  if (state.adminTableMode !== "grid") return `
+    <div class="inspection-record-list">
+      <div class="inspection-list-head" aria-hidden="true"><span>${t("equipment")}</span><span>${t("point")}</span><span>${t("assignee")}</span><span>${t("status")}</span><span></span></div>
+      ${rows.map(renderRecordListRow).join("")}
+    </div>
+  `;
   const tableClasses = ["excel-table"];
   if (isAdminProjectFixed()) tableClasses.push("hide-project");
   if (state.adminTreeSelection || state.adminProjectId) tableClasses.push("compact-location");
@@ -2639,6 +2612,32 @@ function renderDataTable() {
         ${getAdminRows().map(renderDataRow).join("")}
       </div>
     </div>
+  `;
+}
+
+function renderRecordListRow({ record, equipment, point }) {
+  return `
+    <details class="inspection-record" data-disclosure="record-${record.id}" ${disclosureOpen(`record-${record.id}`)}>
+      <summary>
+        <span class="record-equipment"><strong>${escapeHtml(equipment.name)}</strong><small>${escapeHtml(getCompactLocationName(equipment.locationId))}</small></span>
+        <span class="record-point"><strong>${escapeHtml(point.name)}</strong><small>${escapeHtml(point.type)} · ${escapeHtml(point.reference || "—")}</small></span>
+        <span class="record-assignee">${escapeHtml(record.assignee || uiText("Unassigned", "尚未指派"))}</span>
+        <span class="badge ${record.status}">${statusLabel(record.status)}</span>
+        <span class="record-edit-label">${uiText("Edit", "編輯")} <span aria-hidden="true">⌄</span></span>
+      </summary>
+      <form class="inspection-row-editor" data-row-editor data-record-id="${record.id}" data-equipment-id="${equipment.id}" data-point-id="${point.id}">
+        <label>${t("project")}<select name="projectId">${state.data.projects.map((project) => option(project.id, project.name, equipment.projectId)).join("")}</select></label>
+        <label>${t("equipmentName")}<input name="equipmentName" value="${escapeHtml(equipment.name)}" required /></label>
+        <label>${t("pointName")}<input name="pointName" value="${escapeHtml(point.name)}" required /></label>
+        <label>${t("pointType")}<input name="pointType" value="${escapeHtml(point.type)}" /></label>
+        <label>${t("reference")}<input name="reference" value="${escapeHtml(point.reference || "")}" /></label>
+        <label>${t("assignee")}<input name="assignee" value="${escapeHtml(record.assignee || "")}" /></label>
+        <label>${t("status")}<select name="status">${["pending", "passed", "failed", "rectification", "closed"].map((status) => option(status, statusLabel(status), record.status)).join("")}</select></label>
+        <input type="hidden" name="equipmentType" value="${escapeHtml(equipment.type)}" />
+        <input type="hidden" name="locationId" value="${escapeHtml(equipment.locationId)}" />
+        <div class="record-editor-actions"><span>${uiText("Changes apply when you save.", "修改後按保存才會生效。")}</span><button class="primary" type="submit">${uiText("Save changes", "保存修改")}</button></div>
+      </form>
+    </details>
   `;
 }
 
@@ -3132,11 +3131,15 @@ async function changePassword(event) {
 }
 
 async function logout() {
+  if (attachmentSaves.size) return flash(uiText("Wait for the attachment save to finish.", "請等待附件保存完成。"));
+  if (hasFieldDrafts() && !window.confirm(uiText("Unsaved notes or selected files will be discarded. Sign out?", "尚未保存的備註或附件選擇將被清除，確定登出？"))) return;
   try {
     if (state.authToken) await apiPost("/auth/logout", {});
   } catch {
     // Logout should always clear the local session.
   }
+  fieldNoteDrafts.clear();
+  fieldFileDrafts.clear();
   setState({ authToken: "", currentUser: null, view: "field", toast: "" });
 }
 
@@ -3153,6 +3156,7 @@ function setAdminPage(page) {
   pendingMediaUploadDraft = {};
   mediaUploadSaving = false;
   setState({ adminPage: page, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "", dashboardFilter: page === "dashboard" ? state.dashboardFilter : "all", dashboardEntityId: page === "dashboard" ? state.dashboardEntityId : "" });
+  window.scrollTo(0, 0);
   if (page === "people") loadAuditLogs({ page: 1 });
 }
 
@@ -3169,6 +3173,7 @@ function setView(view) {
   pendingMediaUploadDraft = {};
   mediaUploadSaving = false;
   setState({ view, selectedIssueId: "", fieldAddPointOpen: false, mediaUploadOpen: false, mediaUploadEquipmentId: "" });
+  window.scrollTo(0, 0);
 }
 
 function hasRole(allowedRoles) {
@@ -3336,6 +3341,38 @@ function bindIssueDetailEvents() {
 }
 
 function bindEvents() {
+  document.querySelectorAll("[data-disclosure]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      setState({ disclosures: { ...state.disclosures, [details.dataset.disclosure]: details.open } }, false);
+    });
+  });
+  document.querySelector("[data-add-user]")?.addEventListener("click", () => {
+    const details = document.querySelector(".new-user-disclosure");
+    if (!details) return;
+    details.open = true;
+    details.querySelector("input[name='name']")?.focus();
+  });
+  document.querySelector(".workspace-shell")?.addEventListener("click", (event) => {
+    const menu = document.querySelector(".account-menu");
+    if (menu && !menu.contains(event.target)) menu.open = false;
+  });
+  document.querySelector(".account-menu")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.currentTarget.open = false;
+    event.currentTarget.querySelector("summary")?.focus();
+  });
+  document.querySelector("[data-project-picker]")?.addEventListener("change", (event) => selectAdminProject(event.target.value));
+  document.querySelectorAll("[data-reset-data-filters]").forEach((button) => {
+    button.addEventListener("click", () => setState({ adminTreeSelection: null, adminEquipmentId: "", adminSearch: "", adminSearchDraft: "" }));
+  });
+  document.querySelector("[data-toggle-data-grid]")?.addEventListener("click", () => setState({ adminTableMode: state.adminTableMode === "grid" ? "list" : "grid" }));
+  document.querySelectorAll("[data-open-project]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setState({ view: "admin", adminPage: "data", adminSearch: "", adminSearchDraft: "" }, false);
+      selectAdminProject(button.dataset.openProject);
+      window.scrollTo(0, 0);
+    });
+  });
   document.querySelector("[data-login-form]")?.addEventListener("submit", login);
   document.querySelectorAll("[data-demo-login]").forEach((button) => {
     button.addEventListener("click", () => fillDemoLogin(JSON.parse(decodeURIComponent(button.dataset.demoLogin))));
@@ -3448,7 +3485,7 @@ function bindEvents() {
     button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.record }));
   });
   document.querySelectorAll("[data-quick-result]").forEach((button) => {
-    button.addEventListener("click", () => updateRecordQuick(button.dataset.record, button.dataset.quickResult, button.dataset.pointId));
+    button.addEventListener("click", () => updateRecordQuick(button.dataset.resultRecord, button.dataset.quickResult, button.dataset.pointId));
   });
   document.querySelectorAll("[data-comment-record]").forEach((button) => {
     button.addEventListener("click", () => setState({ selectedRecordId: button.dataset.commentRecord }));
@@ -3457,7 +3494,23 @@ function bindEvents() {
     button.addEventListener("click", () => selectPoint(button.dataset.editPoint));
   });
   document.querySelectorAll("[data-comment-input]").forEach((input) => {
-    input.addEventListener("change", () => updateRecordComment(input.dataset.commentInput, input.value));
+    input.addEventListener("input", () => {
+      fieldNoteDrafts.set(input.dataset.commentPoint, input.value);
+      const panel = input.closest(".point-inspection");
+      panel.querySelector("[data-save-note]").disabled = false;
+      panel.querySelector("[data-note-status]").textContent = uiText("Unsaved notes", "備註尚未保存");
+    });
+  });
+  document.querySelectorAll("[data-save-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const pointId = button.dataset.saveNote;
+      const recordId = ensureRecordForPoint("", pointId);
+      if (!recordId) return flash(t("noRecord"));
+      const value = fieldNoteDrafts.get(pointId);
+      if (value === undefined) return;
+      fieldNoteDrafts.delete(pointId);
+      updateRecordComment(recordId, value);
+    });
   });
   document.querySelector("[data-action='sync']")?.addEventListener("click", () => syncRecords(true));
   document.querySelector("[data-action='translate']")?.addEventListener("click", translateComment);
@@ -3491,13 +3544,6 @@ function bindEvents() {
   document.querySelectorAll("[data-user-editor]").forEach((form) => {
     form.addEventListener("submit", saveUser);
   });
-  document.querySelectorAll("[data-focus-new-user]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const field = document.querySelector(".new-user-card input[name='name']");
-      field?.focus();
-      field?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-  });
   document.querySelectorAll("[data-unlock-user]").forEach((button) => {
     button.addEventListener("click", () => unlockUser(button.dataset.unlockUser));
   });
@@ -3521,10 +3567,36 @@ function bindEvents() {
   });
   document.querySelector(".inspection-form")?.addEventListener("submit", saveInspection);
   document.querySelector(".attachment-dock")?.addEventListener("submit", saveInspection);
+  document.querySelectorAll(".attachment-dock input[type='file']").forEach((input) => {
+    const saved = fieldFileDrafts.get(input.form.dataset.form)?.[input.name];
+    if (saved?.length) {
+      const transfer = new DataTransfer();
+      saved.forEach((file) => transfer.items.add(file));
+      input.files = transfer.files;
+    }
+    input.addEventListener("change", () => {
+      const form = input.form;
+      fieldFileDrafts.set(form.dataset.form, { camera: [...form.camera.files], attachments: [...form.attachments.files] });
+      refreshAttachmentSelection(form);
+    });
+  });
+  document.querySelectorAll(".attachment-dock").forEach(refreshAttachmentSelection);
   document.querySelectorAll("[data-editor]").forEach((form) => {
     form.addEventListener("submit", saveAdminEditor);
   });
   bindIssueDetailEvents();
+}
+
+function refreshAttachmentSelection(form) {
+  const count = form.camera.files.length + form.attachments.files.length;
+  const busy = attachmentSaves.has(form.dataset.form);
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = busy || count === 0;
+  button.textContent = busy ? uiText("Saving…", "保存中…") : uiText("Save attachments", "保存附件");
+  form.querySelectorAll("input[type='file']").forEach((input) => { input.disabled = busy; });
+  form.querySelector(".attachment-selection").textContent = count
+    ? uiText(`${count} file(s) selected · not saved yet`, `已選 ${count} 個附件，尚未保存`)
+    : uiText("No new files selected", "尚未選擇新附件");
 }
 
 function startTreeResize(event) {
@@ -3811,8 +3883,22 @@ async function saveInspection(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const id = form.dataset.form;
+  if (attachmentSaves.has(id)) return;
   const files = [...form.camera.files, ...form.attachments.files];
-  const attachments = await storeInspectionAttachments(files);
+  attachmentSaves.add(id);
+  if (form.matches(".attachment-dock")) refreshAttachmentSelection(form);
+  let attachments;
+  try {
+    attachments = await storeInspectionAttachments(files);
+  } catch {
+    attachmentSaves.delete(id);
+    render();
+    flash(uiText("Files could not be saved. Your selection is retained; try again.", "附件未能保存，已保留選擇，請重試。"));
+    return;
+  }
+  attachmentSaves.delete(id);
+  fieldFileDrafts.delete(id);
+  form.reset();
   const records = state.data.records.map((record) => {
     if (record.id !== id) return record;
     const result = form.result?.value || record.result || "Pending";
@@ -3831,8 +3917,8 @@ async function saveInspection(event) {
     };
   });
   const data = refreshLocalStatuses({ ...state.data, records });
-  setState({ data, toast: t("success") });
-  window.setTimeout(() => setState({ toast: "" }), 2200);
+  setState({ data });
+  flash(t("success"));
   await syncRecords(false);
 }
 
@@ -3905,7 +3991,8 @@ function updateRecord(recordId, patch) {
     };
   });
   const data = refreshLocalStatuses({ ...state.data, records });
-  setState({ data, selectedRecordId: recordId, toast: t("success") });
+  setState({ data, selectedRecordId: recordId });
+  flash(t("success"));
   const updatedRecord = records.find((record) => record.id === recordId);
   if (updatedRecord) {
     queuePendingMutation({
@@ -3916,7 +4003,6 @@ function updateRecord(recordId, patch) {
       equipmentId: updatedRecord.equipmentId
     }).then(() => hydratePendingMutationSummary(false)).catch((error) => console.warn("Unable to queue structural mutation.", error));
   }
-  window.setTimeout(() => setState({ toast: "" }), 1600);
   return true;
 }
 
@@ -4344,10 +4430,11 @@ async function saveDataRow(event) {
   payload.pointId = form.dataset.pointId;
   try {
     const response = await apiPost("/admin/row", payload);
+    setState({ disclosures: { ...state.disclosures, [`record-${payload.recordId}`]: false } }, false);
     setData(response);
     flash(t("rowSaved"));
-  } catch {
-    flash(t("serverOffline"));
+  } catch (error) {
+    flash(error.message || t("serverOffline"));
   }
 }
 
@@ -4377,6 +4464,7 @@ async function saveUser(event) {
   if (!payload.password) delete payload.password;
   try {
     const response = await apiPost("/admin/user", payload);
+    setState({ disclosures: { ...state.disclosures, [isNew ? "new-user" : `user-${payload.id}`]: false } }, false);
     setData(response);
     flash(t("updateSuccess"));
   } catch (error) {
@@ -4872,6 +4960,7 @@ async function storeInspectionAttachments(files) {
         console.warn("Unable to save local attachment.", error);
       }
     }
+    if (localAttachments.length !== fileList.length) throw new Error("Local attachment storage failed");
     return localAttachments;
   }
 }
@@ -5155,15 +5244,35 @@ function fileToBase64(file) {
   });
 }
 
+let toastTimer;
 function flash(message) {
-  setState({ toast: message });
-  window.setTimeout(() => setState({ toast: "" }), 2200);
+  // Feedback must not rebuild the form and discard the user's unsaved input.
+  setState({ toast: message }, false);
+  const toast = document.querySelector(".toast");
+  if (toast) {
+    toast.textContent = message;
+    toast.classList.add("show");
+  }
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    setState({ toast: "" }, false);
+    document.querySelector(".toast")?.classList.remove("show");
+  }, 3500);
 }
 
 function escapeHtml(value = "") {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+function hasFieldDrafts() {
+  return fieldNoteDrafts.size > 0 || [...fieldFileDrafts.values()].some((draft) => draft.camera.length + draft.attachments.length > 0);
+}
+
+window.addEventListener("beforeunload", (event) => {
+  if (!hasFieldDrafts() && !attachmentSaves.size) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 window.addEventListener("online", () => syncRecords(false));
 window.addEventListener("offline", render);
 

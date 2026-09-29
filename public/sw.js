@@ -1,4 +1,4 @@
-const CACHE_NAME = "elv-acceptance-v3";
+const CACHE_NAME = "elv-acceptance-v4-ui-workflow";
 const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {

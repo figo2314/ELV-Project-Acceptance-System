@@ -15,6 +15,24 @@ Production was not cut over. The staging service is isolated so ELV and BMS PM W
 
 ## Latest Staging Verification
 
+### UI workflow release — 2026-09-29
+
+- Published the local UI simplification and field-draft workflow changes to existing staging, not production cutover.
+- Build: Vite passed. Production API base is `/api`; demo account UI disabled.
+- Assets: `index-e3n7PFg6.js`, `index-BL3SqZSr.css`.
+- Publisher: `deploy/windows/publish-ui.ps1 -Publish`; default invocation performs preflight only.
+- Published 9 allowlisted files: four frontend source files, public/built service worker, two hashed assets and HTML entry. Assets copied before HTML; old assets retained.
+- Server backup: `C:\ELV_Project_Acceptance\backups\ui-20260929-111953`.
+- Rollback: copy the backed-up source files and `dist` files to their corresponding app paths, restoring `dist/index.html` last. Keep `dist/web.config` unchanged. No service restart is required. New unreferenced hashed assets may remain.
+- Every published file passed SHA-256 comparison. IIS `web.config` and backend `server/index.js` hashes unchanged.
+- HTTP 8088 and HTTPS 8443 homepages and `/api/ready`: 200. BMS ports 80/443 homepages: 200. HTTPS diagnostic requests bypassed certificate verification because the existing certificate is self-signed; this does not establish browser trust.
+- Served HTML exactly matches the build; new JS/CSS served successfully. Browser loads the hardened login page with Online status and no demo shortcuts.
+- No backend restart, database migration, session/config change or server upload mutation performed.
+- Local browser tests: note persistence/clearing, per-point draft retention, selected attachment retention and successful upload/sync. Offline simulation passed. See `docs/ui-simplification.md`.
+- Staging authenticated workflow remains pending user sign-in; no credentials read or reset. PostgreSQL permission smoke, physical-device offline replay and 100-user load test were not rerun for this frontend-only release.
+
+### Previous verification — 2026-09-28
+
 - Verified: 2026-09-28 (Asia/Shanghai)
 - Local source: `main` at `6e00048` (`Add Codex project guidance`); local `main` is six commits ahead of `origin/main`.
 - Local production build (`vite build` using the bundled Node runtime): passed.

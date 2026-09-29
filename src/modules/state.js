@@ -6,7 +6,7 @@ export const OFFLINE_SYNC_DB_VERSION = 1;
 export const MUTATION_STORE = "pending_mutations";
 export const ASSET_STORE = "pending_assets";
 export const MEDIA_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
-export const SEARCH_DEBOUNCE_MS = 1100;
+export const SEARCH_DEBOUNCE_MS = 250;
 export const SYNC_RETRY_DELAYS = [5000, 10000];
 export const MAX_SYNC_RETRY_DELAY = 60000;
 
